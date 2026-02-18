@@ -40,21 +40,14 @@ const TIMER_CIRCUMFERENCE = 2 * Math.PI * TIMER_RADIUS;
 
 export const VerbSlot = ({ slot, queuedDrop, onComplete }: VerbSlotProps): ReactElement => {
   const lastQueuedDropTokenRef = useRef<number | null>(null);
+  const emittedCompletionTokenRef = useRef<number | null>(null);
 
   const machine = useMemo(() => {
     return createVerbSlotMachine({
       slotId: slot.id,
       durationMs: slot.durationMs,
-      onComplete: ({ token, cardId, cardTitle, slotId }): void => {
-        onComplete({
-          token,
-          slotId,
-          cardId,
-          cardTitle,
-        });
-      },
     });
-  }, [onComplete, slot.durationMs, slot.id]);
+  }, [slot.durationMs, slot.id]);
 
   const [state, send] = useMachine(machine, {});
 
@@ -87,7 +80,44 @@ export const VerbSlot = ({ slot, queuedDrop, onComplete }: VerbSlotProps): React
       cardId: queuedDrop.cardId,
       cardTitle: queuedDrop.cardTitle,
     });
+
+    emittedCompletionTokenRef.current = null;
   }, [queuedDrop, send, slot.id]);
+
+  const isCoolingDown = state.matches('cooldown');
+  const queuedToken = state.context.queuedToken;
+  const queuedCardId = state.context.queuedCardId;
+  const queuedCardTitle = state.context.queuedCardTitle;
+
+  useEffect((): void => {
+    if (!isCoolingDown) {
+      return;
+    }
+
+    if (queuedToken === null || queuedCardId === null || queuedCardTitle === null) {
+      return;
+    }
+
+    if (emittedCompletionTokenRef.current === queuedToken) {
+      return;
+    }
+
+    emittedCompletionTokenRef.current = queuedToken;
+
+    onComplete({
+      token: queuedToken,
+      slotId: slot.id,
+      cardId: queuedCardId,
+      cardTitle: queuedCardTitle,
+    });
+  }, [
+    isCoolingDown,
+    onComplete,
+    queuedCardId,
+    queuedCardTitle,
+    queuedToken,
+    slot.id,
+  ]);
 
   const progress = 1 - state.context.remainingMs / state.context.durationMs;
   const normalizedProgress = Math.max(0, Math.min(1, progress));

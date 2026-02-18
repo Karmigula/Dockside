@@ -33,6 +33,8 @@ export const useVerbStore = create<VerbStoreState>((set, get) => {
       const acknowledged = new Set(actionIds);
 
       set((state): Pick<VerbStoreState, 'pendingActions'> => {
+        // Assumption: enqueue/acknowledge run on the same JS thread (no worker concurrency).
+        // Under this model, actions enqueued after a peek are preserved unless explicitly acknowledged.
         return {
           pendingActions: state.pendingActions.filter((action): boolean => {
             return !acknowledged.has(action.id);

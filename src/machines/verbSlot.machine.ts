@@ -6,12 +6,6 @@ type VerbSlotMachineInput = {
   slotId: ActiveVerbSlotId;
   durationMs: number;
   cooldownMs?: number;
-  onComplete?: (signal: {
-    token: number;
-    slotId: ActiveVerbSlotId;
-    cardId: string;
-    cardTitle: string;
-  }) => void;
 };
 
 type VerbSlotMachineContext = {
@@ -52,25 +46,6 @@ export const createVerbSlotMachine = (input: VerbSlotMachineInput) => {
       slotTick: SLOT_TICK_MS,
       cooldownDelay: ({ context }): number => {
         return context.cooldownMs;
-      },
-    },
-    actions: {
-      emitCompletion: ({ context }): void => {
-        if (
-          context.queuedToken === null ||
-          context.queuedCardId === null ||
-          context.queuedCardTitle === null ||
-          input.onComplete === undefined
-        ) {
-          return;
-        }
-
-        input.onComplete({
-          token: context.queuedToken,
-          slotId: context.slotId,
-          cardId: context.queuedCardId,
-          cardTitle: context.queuedCardTitle,
-        });
       },
     },
   }).createMachine({
@@ -155,9 +130,6 @@ export const createVerbSlotMachine = (input: VerbSlotMachineInput) => {
         },
       },
       cooldown: {
-        entry: {
-          type: 'emitCompletion',
-        },
         after: {
           cooldownDelay: {
             target: 'idle',

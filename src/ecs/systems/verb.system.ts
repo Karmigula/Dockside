@@ -269,5 +269,3 @@ export type VerbSystemInstance = ReturnType<ReturnType<typeof createVerbSystemBu
 export const createVerbSystem = (options: VerbSystemOptions = {}): VerbSystemInstance => {
   return createVerbSystemBuilder(options).build();
 };
-
-export const VerbSystem = createVerbSystem();

@@ -12,6 +12,7 @@ import type { VerbResolution } from '../ecs/systems/verb.system';
 import { acknowledgeCompletedVerbActions, peekCompletedVerbActions } from './verbStore';
 
 const MAX_STREET_WIRE_ENTRIES = 16;
+const VERB_INFLIGHT_MAX_TICKS = 90;
 
 type SimulationStatus = 'idle' | 'booting' | 'running' | 'error';
 
@@ -37,6 +38,7 @@ type GameStoreSingleton = {
   snapshotFrameToken: number | null;
   inflightVerbActionIds: string[];
   resolvedVerbActionIds: Set<string>;
+  inflightVerbTickAge: number;
 };
 
 const GAME_STORE_SINGLETON_KEY = '__dockside_game_store_singleton__';
@@ -56,6 +58,7 @@ const getGameStoreSingleton = (): GameStoreSingleton => {
       snapshotFrameToken: null,
       inflightVerbActionIds: [],
       resolvedVerbActionIds: new Set<string>(),
+      inflightVerbTickAge: 0,
     };
   }
 
@@ -197,6 +200,7 @@ export const useGameStore = create<GameStoreState>((set, get) => {
                 return action.id;
               });
               singleton.resolvedVerbActionIds.clear();
+              singleton.inflightVerbTickAge = 0;
 
               return pendingActions;
             },
@@ -212,12 +216,31 @@ export const useGameStore = create<GameStoreState>((set, get) => {
                   acknowledgeCompletedVerbActions(singleton.inflightVerbActionIds);
                   singleton.inflightVerbActionIds = [];
                   singleton.resolvedVerbActionIds.clear();
+                  singleton.inflightVerbTickAge = 0;
                 }
               }
 
               get().recordVerbResolution(resolution);
             },
             onTick: (snapshot): void => {
+              if (singleton.inflightVerbActionIds.length > 0) {
+                singleton.inflightVerbTickAge += 1;
+
+                if (singleton.inflightVerbTickAge >= VERB_INFLIGHT_MAX_TICKS) {
+                  const stalledActionIds = [...singleton.inflightVerbActionIds];
+
+                  acknowledgeCompletedVerbActions(stalledActionIds);
+                  singleton.inflightVerbActionIds = [];
+                  singleton.resolvedVerbActionIds.clear();
+                  singleton.inflightVerbTickAge = 0;
+
+                  get().addStreetWireLine(
+                    'A verb batch stalled in transit. Jeffries forces the ledger shut and moves on.',
+                    'warning',
+                  );
+                }
+              }
+
               singleton.queuedSnapshot = snapshot;
 
               if (singleton.snapshotFrameToken !== null) {
@@ -254,6 +277,7 @@ export const useGameStore = create<GameStoreState>((set, get) => {
       singleton.queuedSnapshot = null;
       singleton.inflightVerbActionIds = [];
       singleton.resolvedVerbActionIds.clear();
+      singleton.inflightVerbTickAge = 0;
 
       if (singleton.simulationHandle !== null) {
         singleton.simulationHandle.stop();

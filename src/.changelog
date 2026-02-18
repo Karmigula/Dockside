@@ -9,6 +9,29 @@ This file tracks source edits made in this workspace and should be continuously 
 
 ## Edit Log
 
+### Edit 005 - Remaining-Issues Hardening Pass
+**Scope**
+- Addressed the follow-up architectural risk list after Edit 004.
+- Focused on VerbSlot machine stability, queue deadlock recovery, and store contract safety.
+
+**Files Updated**
+- `src/components/VerbSlot.tsx`
+- `src/machines/verbSlot.machine.ts`
+- `src/store/gameStore.ts`
+- `src/store/verbStore.ts`
+- `src/ecs/systems/verb.system.ts`
+- `src/store/__tests__/verbStore.test.ts`
+
+**Key Results**
+- `VerbSlot` no longer rebuilds its XState machine when `onComplete` callback identity changes.
+- Completion emission moved to a guarded React effect keyed to cooldown state + token context.
+- Added inflight batch timeout fallback in `gameStore` (`VERB_INFLIGHT_MAX_TICKS`) to prevent permanent queue deadlock.
+- Added explicit single-thread assumption comment in `verbStore` acknowledge filtering.
+- Removed module-level `VerbSystem` singleton export to avoid accidental no-op usage.
+- Added dedicated `verbStore` tests for peek/acknowledge behavior and non-destructive acknowledgment.
+
+---
+
 ### Edit 004 - Phase 3 Stability and Architecture Corrections
 **Scope**
 - Resolved critical architecture and correctness issues raised in deep review.
