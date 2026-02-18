@@ -22,6 +22,7 @@ export type VerbSlotModel = {
   id: ActiveVerbSlotId;
   title: string;
   requirementLabel: string;
+  requiredTypes: readonly BoardCardType[];
   accentToken: 'gold' | 'blue' | 'amber' | 'green' | 'orange' | 'red';
   durationMs: number;
 };
@@ -150,6 +151,7 @@ export const PHASE_TWO_VERB_SLOTS = [
     id: 'work',
     title: 'Work',
     requirementLabel: 'Needs: Location',
+    requiredTypes: ['location'],
     accentToken: 'gold',
     durationMs: 3800,
   },
@@ -157,6 +159,7 @@ export const PHASE_TWO_VERB_SLOTS = [
     id: 'scheme',
     title: 'Scheme',
     requirementLabel: 'Needs: Situation + Resource',
+    requiredTypes: ['situation', 'resource'],
     accentToken: 'blue',
     durationMs: 5200,
   },
@@ -164,6 +167,7 @@ export const PHASE_TWO_VERB_SLOTS = [
     id: 'train',
     title: 'Train',
     requirementLabel: 'Needs: Time / Focus',
+    requiredTypes: ['resource'],
     accentToken: 'amber',
     durationMs: 4200,
   },
@@ -171,6 +175,7 @@ export const PHASE_TWO_VERB_SLOTS = [
     id: 'recruit',
     title: 'Recruit',
     requirementLabel: 'Needs: Person + Favors + Intel',
+    requiredTypes: ['person', 'resource', 'resource'],
     accentToken: 'green',
     durationMs: 5600,
   },
@@ -178,6 +183,7 @@ export const PHASE_TWO_VERB_SLOTS = [
     id: 'bribe',
     title: 'Bribe',
     requirementLabel: 'Needs: Person + Cash',
+    requiredTypes: ['person', 'resource'],
     accentToken: 'orange',
     durationMs: 4700,
   },
@@ -185,6 +191,7 @@ export const PHASE_TWO_VERB_SLOTS = [
     id: 'violence',
     title: 'Violence',
     requirementLabel: 'Needs: Person + Muscle',
+    requiredTypes: ['person', 'resource'],
     accentToken: 'red',
     durationMs: 6100,
   },

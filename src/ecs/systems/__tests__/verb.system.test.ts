@@ -6,7 +6,7 @@ import { AssetComponent } from '../../components/assets';
 import { HeatComponent } from '../../components/heat';
 import { IdentityComponent } from '../../components/identity';
 import { LocationComponent } from '../../components/location';
-import { createVerbSystem, type VerbAction, type VerbResolution } from '../verb.system';
+import { createVerbSystem, type VerbAction, type VerbActionCard, type VerbResolution } from '../verb.system';
 
 const runtimeWorlds: IRuntimeWorld[] = [];
 
@@ -134,11 +134,23 @@ const createVerbAction = (overrides: Partial<VerbAction> = {}): VerbAction => {
   return {
     id: 'verb-work-1',
     slotId: 'work',
-    cardId: 'the-docks',
-    cardTitle: 'The Docks',
-    cardType: 'location',
+    cards: [
+      {
+        cardId: 'the-docks',
+        cardTitle: 'The Docks',
+        cardType: 'location',
+      },
+    ],
     completedAtMs: 1000,
     ...overrides,
+  };
+};
+
+const card = (cardId: string, cardTitle: string, cardType: VerbActionCard['cardType']): VerbActionCard => {
+  return {
+    cardId,
+    cardTitle,
+    cardType,
   };
 };
 
@@ -191,9 +203,10 @@ describe('verb.system', (): void => {
       createVerbAction({
         id: 'verb-scheme-1',
         slotId: 'scheme',
-        cardId: 'shipment-window',
-        cardTitle: 'Shipment Looking the Other Way',
-        cardType: 'situation',
+        cards: [
+          card('shipment-window', 'Shipment Looking the Other Way', 'situation'),
+          card('intel', 'Intel', 'resource'),
+        ],
       }),
     );
 
@@ -221,9 +234,38 @@ describe('verb.system', (): void => {
       createVerbAction({
         id: 'verb-scheme-2',
         slotId: 'scheme',
-        cardId: 'the-docks',
-        cardTitle: 'The Docks',
-        cardType: 'location',
+        cards: [
+          card('the-docks', 'The Docks', 'location'),
+          card('intel', 'Intel', 'resource'),
+        ],
+      }),
+    );
+
+    await runtimeWorld.step();
+
+    expect(readJeffriesCash(runtimeWorld)).toBe(BARTHOLOMEU_START.resources.cash);
+    expect(readJeffriesHeat(runtimeWorld).localHeat).toBe(BARTHOLOMEU_START.resources.heat.local);
+    expect(readJeffriesHeat(runtimeWorld).federalHeat).toBe(BARTHOLOMEU_START.resources.heat.federal);
+    expect(resolutions).toHaveLength(1);
+    expect(resolutions[0]?.tone).toBe('warning');
+    expect(resolutions[0]?.cashDelta).toBe(0);
+    expect(resolutions[0]?.localHeatDelta).toBe(0);
+    expect(resolutions[0]?.federalHeatDelta).toBe(0);
+  });
+
+  it('warns and applies no effect when Scheme is missing a resource card', async (): Promise<void> => {
+    const { runtimeWorld, queuedActions, resolutions } = await createHarness([
+      {
+        districtId: 'the_docks',
+        unlocked: true,
+      },
+    ]);
+
+    queuedActions.push(
+      createVerbAction({
+        id: 'verb-scheme-3',
+        slotId: 'scheme',
+        cards: [card('shipment-window', 'Shipment Looking the Other Way', 'situation')],
       }),
     );
 

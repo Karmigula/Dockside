@@ -1,6 +1,7 @@
 import {
   type CollisionDetection,
   DndContext,
+  DragOverlay,
   MouseSensor,
   TouchSensor,
   pointerWithin,
@@ -24,6 +25,7 @@ import {
 import {
   FOUNDATION_VERB_SLOTS,
   type ActiveVerbSlotId,
+  type BoardCardType,
 } from '../data/cards/phase2.board';
 import { getHeatTier } from '../ecs/systems/heat.system';
 import type { FoundationBoardCard } from '../ecs/world';
@@ -59,6 +61,16 @@ type BoardCardPosition = {
 };
 
 type BoardCardCluster = FoundationBoardCard['cluster'];
+
+type BoardCardTypeCountMap = Record<BoardCardType, number>;
+
+type SlotAssignmentResolution = {
+  accepted: boolean;
+  nextAssignments: Record<string, ActiveVerbSlotId>;
+  replacedCardId: string | null;
+};
+
+const OVERLAY_CARD_POSITION = { x: 0, y: 0 };
 
 const MIN_INTERACTIVE_ZOOM = 0.1;
 const ABSOLUTE_MIN_ZOOM = 0.68;
@@ -123,6 +135,110 @@ const quantizeZoom = (value: number): number => {
 
 const strictSlotCollision: CollisionDetection = (args) => {
   return pointerWithin(args);
+};
+
+const createEmptyBoardCardTypeCountMap = (): BoardCardTypeCountMap => {
+  return {
+    person: 0,
+    resource: 0,
+    location: 0,
+    situation: 0,
+  };
+};
+
+const countRequiredCardTypes = (requiredTypes: readonly BoardCardType[]): BoardCardTypeCountMap => {
+  return requiredTypes.reduce((counts, requiredType): BoardCardTypeCountMap => {
+    return {
+      ...counts,
+      [requiredType]: counts[requiredType] + 1,
+    };
+  }, createEmptyBoardCardTypeCountMap());
+};
+
+const resolveSlotAssignmentForDrop = (
+  currentAssignments: Record<string, ActiveVerbSlotId>,
+  movedCard: FoundationBoardCard,
+  slotId: ActiveVerbSlotId,
+  requiredTypes: readonly BoardCardType[],
+  cardsById: ReadonlyMap<string, FoundationBoardCard>,
+): SlotAssignmentResolution => {
+  const requiredTypeCounts = countRequiredCardTypes(requiredTypes);
+  const requiredCountForType = requiredTypeCounts[movedCard.cardType];
+
+  if (requiredCountForType <= 0) {
+    return {
+      accepted: false,
+      nextAssignments: currentAssignments,
+      replacedCardId: null,
+    };
+  }
+
+  const nextWithoutMoved = Object.entries(currentAssignments).reduce((next, [assignedCardId, assignedSlotId]) => {
+    if (assignedCardId === movedCard.id) {
+      return next;
+    }
+
+    return {
+      ...next,
+      [assignedCardId]: assignedSlotId,
+    };
+  }, {} as Record<string, ActiveVerbSlotId>);
+
+  const cardsAlreadyInSlot = Object.entries(nextWithoutMoved)
+    .filter(([, assignedSlotId]): boolean => {
+      return assignedSlotId === slotId;
+    })
+    .map(([assignedCardId]): FoundationBoardCard | undefined => {
+      return cardsById.get(assignedCardId);
+    })
+    .filter((card): card is FoundationBoardCard => {
+      return card !== undefined;
+    });
+
+  const cardsWithSameType = cardsAlreadyInSlot.filter((card): boolean => {
+    return card.cardType === movedCard.cardType;
+  });
+
+  if (cardsWithSameType.length < requiredCountForType) {
+    return {
+      accepted: true,
+      nextAssignments: {
+        ...nextWithoutMoved,
+        [movedCard.id]: slotId,
+      },
+      replacedCardId: null,
+    };
+  }
+
+  const replacedCard = cardsWithSameType[0];
+
+  if (replacedCard === undefined) {
+    return {
+      accepted: false,
+      nextAssignments: currentAssignments,
+      replacedCardId: null,
+    };
+  }
+
+  const nextWithoutReplaced = Object.entries(nextWithoutMoved).reduce((next, [assignedCardId, assignedSlotId]) => {
+    if (assignedCardId === replacedCard.id) {
+      return next;
+    }
+
+    return {
+      ...next,
+      [assignedCardId]: assignedSlotId,
+    };
+  }, {} as Record<string, ActiveVerbSlotId>);
+
+  return {
+    accepted: true,
+    nextAssignments: {
+      ...nextWithoutReplaced,
+      [movedCard.id]: slotId,
+    },
+    replacedCardId: replacedCard.id,
+  };
 };
 
 const toneForSlot = (slotId: ActiveVerbSlotId): 'warning' | 'info' | 'success' => {
@@ -192,6 +308,7 @@ export const MurderBoard = (): ReactElement => {
   const panAnchorRef = useRef<PanAnchor | null>(null);
   const boardCardsRef = useRef<FoundationBoardCard[]>(boardCards);
   const nextCardLayerRef = useRef<number>(2);
+  const nextDropTokenRef = useRef<number>(1);
 
   useEffect((): void => {
     boardCardsRef.current = boardCards;
@@ -312,11 +429,16 @@ export const MurderBoard = (): ReactElement => {
     return selectedCard?.title ?? 'No card selected';
   }, [boardCards, resolvedSelectedCardId]);
 
+  const issueDropToken = (): number => {
+    const token = nextDropTokenRef.current;
+    nextDropTokenRef.current += 1;
+    return token;
+  };
+
   const handleVerbSlotComplete = useCallback((signal: VerbSlotCompletionSignal): void => {
-    const completedCard = boardCardsRef.current.find((card) => card.id === signal.cardId);
     const completedSlot = FOUNDATION_VERB_SLOTS.find((slot) => slot.id === signal.slotId);
 
-    if (completedCard === undefined || completedSlot === undefined) {
+    if (completedSlot === undefined || signal.cards.length === 0) {
       return;
     }
 
@@ -325,18 +447,27 @@ export const MurderBoard = (): ReactElement => {
     queueCompletedVerbAction({
       id: `verb-${signal.token}-${completedAtMs}`,
       slotId: signal.slotId,
-      cardId: signal.cardId,
-      cardTitle: signal.cardTitle,
-      cardType: completedCard.cardType,
+      cards: signal.cards,
       completedAtMs,
     });
 
-    addStreetWireLine(`${signal.cardTitle} finished ${completedSlot.title}. The books are about to move.`, 'info');
+    const leadCardTitle = signal.cards[0]?.cardTitle ?? 'The crew';
+    const queuedCardSummary =
+      signal.cards.length > 1
+        ? `${leadCardTitle} plus ${signal.cards.length - 1} more cards`
+        : leadCardTitle;
+
+    addStreetWireLine(`${queuedCardSummary} finished ${completedSlot.title}. The books are about to move.`, 'info');
   }, [addStreetWireLine]);
 
   const handleDragStart = (event: DragStartEvent): void => {
     const cardId = String(event.active.id);
     const nextLayer = getNextCardLayer();
+    const card = boardCards.find((candidate) => candidate.id === cardId);
+
+    if (import.meta.env.DEV && card !== undefined) {
+      console.debug(`[Dockside][drag] start ${card.title} (${cardId})`);
+    }
 
     setActiveCardId(cardId);
     setSelectedCardId(cardId);
@@ -398,36 +529,62 @@ export const MurderBoard = (): ReactElement => {
       return;
     }
 
-    const token = Date.now();
+    const cardsById = boardCardsRef.current.reduce((indexedCards, card): Map<string, FoundationBoardCard> => {
+      indexedCards.set(card.id, card);
+      return indexedCards;
+    }, new Map<string, FoundationBoardCard>());
+
+    const assignmentResolution = resolveSlotAssignmentForDrop(
+      assignedSlots,
+      movedCard,
+      slot.id,
+      slot.requiredTypes,
+      cardsById,
+    );
+
+    if (!assignmentResolution.accepted) {
+      addStreetWireLine(
+        `${movedCard.title} does not fit ${slot.title}. ${slot.requirementLabel}.`,
+        'warning',
+      );
+      return;
+    }
+
+    const token = issueDropToken();
+    const replacedCard =
+      assignmentResolution.replacedCardId === null
+        ? null
+        : cardsById.get(assignmentResolution.replacedCardId) ?? null;
 
     console.info(`[Dockside] ${movedCard.title} dropped into ${slot.title}.`);
 
-    setAssignedSlots((current): Record<string, ActiveVerbSlotId> => {
-      const nextAssignments = Object.entries(current).reduce((next, [assignedCardId, assignedSlotId]) => {
-        if (assignedSlotId === slot.id || assignedCardId === movedCard.id) {
-          return next;
-        }
-
-        return {
-          ...next,
-          [assignedCardId]: assignedSlotId,
-        };
-      }, {} as Record<string, ActiveVerbSlotId>);
-
-      return {
-        ...nextAssignments,
-        [movedCard.id]: slot.id,
-      };
-    });
+    setAssignedSlots(assignmentResolution.nextAssignments);
 
     setQueuedDrop({
       token,
       slotId: slot.id,
       cardId: movedCard.id,
       cardTitle: movedCard.title,
+      cardType: movedCard.cardType,
     });
 
+    if (replacedCard !== null) {
+      addStreetWireLine(
+        `${movedCard.title} slid into ${slot.title}. ${replacedCard.title} gets bumped off the stack.`,
+        toneForSlot(slot.id),
+      );
+      return;
+    }
+
     addStreetWireLine(`${movedCard.title} slid into ${slot.title}. The timer ring starts to burn.`, toneForSlot(slot.id));
+  };
+
+  const handleDragCancel = (): void => {
+    if (import.meta.env.DEV) {
+      console.debug('[Dockside][drag] cancel');
+    }
+
+    setActiveCardId(null);
   };
 
   const handleWheel = (event: WheelEvent<HTMLDivElement>): void => {
@@ -549,6 +706,7 @@ export const MurderBoard = (): ReactElement => {
         collisionDetection={strictSlotCollision}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
       >
         <div className="murder-board__layout">
           <aside className="verb-rack" aria-label="Verb slots">
@@ -563,7 +721,7 @@ export const MurderBoard = (): ReactElement => {
 
           <section
             ref={canvasRef}
-            className={activeCardId === null ? 'board-canvas' : 'board-canvas board-canvas--dragging'}
+            className="board-canvas"
             aria-label="Murder board canvas"
             onWheel={handleWheel}
             onPointerDown={handleBoardPointerDown}
@@ -594,6 +752,8 @@ export const MurderBoard = (): ReactElement => {
                     position={cardPosition}
                     boardZoom={zoom}
                     zIndex={resolvedCardZIndices[card.id] ?? 1}
+                    suppressDragTransform={activeCardId === card.id}
+                    mutedWhileDragging={activeCardId === card.id}
                     onSelect={setSelectedCardId}
                   />
                 );
@@ -603,6 +763,24 @@ export const MurderBoard = (): ReactElement => {
 
           <EventLog entries={streetWireEntries} />
         </div>
+
+        <DragOverlay zIndex={1000} dropAnimation={null}>
+          {activeDragCard === null ? null : (
+            <Card
+              card={activeDragCard}
+              selected={resolvedSelectedCardId === activeDragCard.id}
+              assignedSlot={assignedSlots[activeDragCard.id] ?? null}
+              heatLens={resolveCardHeatLens(jeffriesSnapshot.localHeat, jeffriesSnapshot.federalHeat)}
+              position={OVERLAY_CARD_POSITION}
+              boardZoom={1}
+              zIndex={1}
+              onSelect={setSelectedCardId}
+              interactive={false}
+              dragOverlay={true}
+              suppressDragTransform={true}
+            />
+          )}
+        </DragOverlay>
       </DndContext>
     </main>
   );

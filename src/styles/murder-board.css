@@ -297,16 +297,7 @@
   user-select: none;
   -webkit-user-select: none;
   position: relative;
-  /* Canvas sits at z-index 1 normally; cards inside are scoped to this context */
   z-index: 1;
-  /* Isolate the card stacking context so dragged cards never bleed over panels */
-  isolation: isolate;
-}
-
-.board-canvas--dragging {
-  /* Open overflow so the dragged card can visually leave the canvas boundary */
-  overflow: visible;
-  /* Do NOT raise z-index here — isolation keeps cards contained */
 }
 
 .board-canvas:active {

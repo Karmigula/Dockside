@@ -9,6 +9,51 @@ This file tracks source edits made in this workspace and should be continuously 
 
 ## Edit Log
 
+### Edit 007B - Multi-Card Verb Slot Model
+**Scope**
+- Implemented multi-card verb slot requirements end-to-end across static data, UI slot state, and verb resolution payloads.
+
+**Files Updated**
+- `src/data/cards/phase2.board.ts`
+- `src/machines/verbSlot.machine.ts`
+- `src/components/VerbSlot.tsx`
+- `src/components/MurderBoard.tsx`
+- `src/ecs/systems/verb.system.ts`
+- `src/ecs/systems/__tests__/verb.system.test.ts`
+- `src/store/__tests__/verbStore.test.ts`
+
+**Key Results**
+- `VerbSlotModel` now declares `requiredTypes: readonly BoardCardType[]`, with explicit per-slot requirements in seed data.
+- Verb slot machine now tracks `queuedCards` and required type counts, supports per-type replacement, and only enters running when requirements are fully satisfied.
+- `VerbSlot` now sends `cardType` on `DROP_CARD`, emits completion payloads with all queued cards, and renders queue progress as `count/required` with card summaries.
+- Murder Board drop logic now enforces slot type compatibility and per-type capacity, supports in-slot replacement, and issues monotonic drop tokens.
+- Completed verb actions now carry multi-card payloads (`cards[]`) instead of a single card.
+- `VerbSystem` resolution now consumes card stacks (e.g., Scheme requires situation + resource), with updated outcomes and coverage.
+- Added regression test coverage for incomplete Scheme stacks and updated store/action tests to the new payload shape.
+
+---
+
+### Edit 007A - DragOverlay Lift and External Verb Ticking
+**Scope**
+- Addressed runtime-only behavior regressions: drag layering and slot timer reliability under Strict Mode.
+
+**Files Updated**
+- `src/components/MurderBoard.tsx`
+- `src/components/Card.tsx`
+- `src/components/VerbSlot.tsx`
+- `src/machines/verbSlot.machine.ts`
+- `src/styles/murder-board.css`
+
+**Key Results**
+- Replaced in-canvas dragged-card rendering with `DragOverlay` so active drags render above all panels.
+- Source card now remains anchored and visually muted while overlay card follows pointer.
+- Removed canvas-level `isolation` dependency and stale `board-canvas--dragging` stacking workaround.
+- Refactored verb slot machine off internal `after` timers onto explicit `TICK` events.
+- Added component-driven interval loop (`VERB_SLOT_TICK_MS`) to progress running/cooldown states predictably.
+- Preserved completion token guards and existing queue/ack flow.
+
+---
+
 ### Edit 006 - Timer Ring, DROP_CARD Guard, and Canvas Z-Index Fix
 **Scope**
 - Fixed three live runtime bugs: timer ring not visually progressing, potential same-tick token collision on DROP_CARD, and dragged cards bleeding above verb rack / event log panels.

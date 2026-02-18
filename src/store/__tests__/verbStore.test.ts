@@ -12,9 +12,13 @@ const buildAction = (id: string): CompletedVerbAction => {
   return {
     id,
     slotId: 'work',
-    cardId: `card-${id}`,
-    cardTitle: `Card ${id}`,
-    cardType: 'location',
+    cards: [
+      {
+        cardId: `card-${id}`,
+        cardTitle: `Card ${id}`,
+        cardType: 'location',
+      },
+    ],
     completedAtMs: 1000,
   };
 };

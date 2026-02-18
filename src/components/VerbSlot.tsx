@@ -3,21 +3,25 @@ import { useMachine } from '@xstate/react';
 import { motion } from 'framer-motion';
 import { useEffect, useMemo, useRef, type ReactElement } from 'react';
 
-import type { ActiveVerbSlotId, VerbSlotModel } from '../data/cards/phase2.board';
-import { createVerbSlotMachine } from '../machines/verbSlot.machine';
+import type { ActiveVerbSlotId, BoardCardType, VerbSlotModel } from '../data/cards/phase2.board';
+import {
+  VERB_SLOT_TICK_MS,
+  createVerbSlotMachine,
+  type VerbSlotQueuedCard,
+} from '../machines/verbSlot.machine';
 
 export type VerbSlotDropSignal = {
   token: number;
   slotId: ActiveVerbSlotId;
   cardId: string;
   cardTitle: string;
+  cardType: BoardCardType;
 };
 
 export type VerbSlotCompletionSignal = {
   token: number;
   slotId: ActiveVerbSlotId;
-  cardId: string;
-  cardTitle: string;
+  cards: readonly VerbSlotQueuedCard[];
 };
 
 type VerbSlotProps = {
@@ -41,13 +45,15 @@ const TIMER_CIRCUMFERENCE = 2 * Math.PI * TIMER_RADIUS;
 export const VerbSlot = ({ slot, queuedDrop, onComplete }: VerbSlotProps): ReactElement => {
   const lastQueuedDropTokenRef = useRef<number | null>(null);
   const emittedCompletionTokenRef = useRef<number | null>(null);
+  const previousPhaseRef = useRef<'idle' | 'running' | 'cooldown'>('idle');
 
   const machine = useMemo(() => {
     return createVerbSlotMachine({
       slotId: slot.id,
       durationMs: slot.durationMs,
+      requiredTypes: slot.requiredTypes,
     });
-  }, [slot.durationMs, slot.id]);
+  }, [slot.durationMs, slot.id, slot.requiredTypes]);
 
   const [state, send] = useMachine(machine);
 
@@ -82,20 +88,53 @@ export const VerbSlot = ({ slot, queuedDrop, onComplete }: VerbSlotProps): React
       token: queuedDrop.token,
       cardId: queuedDrop.cardId,
       cardTitle: queuedDrop.cardTitle,
+      cardType: queuedDrop.cardType,
     });
   }, [queuedDrop, send, slot.id]);
 
   const isCoolingDown = state.matches('cooldown');
+  const isRunning = state.matches('running');
+  const slotPhase: 'idle' | 'running' | 'cooldown' = isRunning ? 'running' : isCoolingDown ? 'cooldown' : 'idle';
   const queuedToken = state.context.queuedToken;
-  const queuedCardId = state.context.queuedCardId;
-  const queuedCardTitle = state.context.queuedCardTitle;
+  const queuedCards = state.context.queuedCards;
+  const queuedCardTitles = queuedCards.map((queuedCard): string => {
+    return queuedCard.cardTitle;
+  });
+  const queuedCardsSummary = queuedCardTitles.length === 0 ? 'empty' : queuedCardTitles.join(' + ');
+
+  useEffect((): void => {
+    if (import.meta.env.DEV && previousPhaseRef.current !== slotPhase) {
+      console.debug(
+        `[Dockside][verb-slot:${slot.id}] ${previousPhaseRef.current} -> ${slotPhase} (${queuedCardsSummary})`,
+      );
+    }
+
+    previousPhaseRef.current = slotPhase;
+  }, [queuedCardsSummary, slot.id, slotPhase]);
+
+  useEffect((): (() => void) | void => {
+    if (!isRunning && !isCoolingDown) {
+      return;
+    }
+
+    const timerId = globalThis.setInterval((): void => {
+      send({
+        type: 'TICK',
+        deltaMs: VERB_SLOT_TICK_MS,
+      });
+    }, VERB_SLOT_TICK_MS);
+
+    return (): void => {
+      globalThis.clearInterval(timerId);
+    };
+  }, [isCoolingDown, isRunning, send]);
 
   useEffect((): void => {
     if (!isCoolingDown) {
       return;
     }
 
-    if (queuedToken === null || queuedCardId === null || queuedCardTitle === null) {
+    if (queuedToken === null || queuedCards.length === 0) {
       return;
     }
 
@@ -108,10 +147,14 @@ export const VerbSlot = ({ slot, queuedDrop, onComplete }: VerbSlotProps): React
     onComplete({
       token: queuedToken,
       slotId: slot.id,
-      cardId: queuedCardId,
-      cardTitle: queuedCardTitle,
+      cards: queuedCards,
     });
-  }, [isCoolingDown, onComplete, queuedCardId, queuedCardTitle, queuedToken, slot.id]);
+  }, [isCoolingDown, onComplete, queuedCards, queuedToken, slot.id]);
+
+  const queueLabel =
+    queuedCards.length === 0
+      ? 'Drop cards'
+      : `${queuedCards.length}/${slot.requiredTypes.length}: ${queuedCardTitles.join(' + ')}`;
 
   // Progress runs 0 → 1 over durationMs. Guard against durationMs === 0.
   const rawProgress =
@@ -182,9 +225,7 @@ export const VerbSlot = ({ slot, queuedDrop, onComplete }: VerbSlotProps): React
         </svg>
 
         <span className="verb-slot__queue-label">
-          {state.context.queuedCardTitle === null
-            ? 'Drop card'
-            : `Card: ${state.context.queuedCardTitle}`}
+          {queueLabel}
         </span>
       </div>
 

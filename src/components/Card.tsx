@@ -17,6 +17,10 @@ type CardProps = {
   boardZoom: number;
   zIndex: number;
   onSelect: (cardId: string) => void;
+  interactive?: boolean;
+  dragOverlay?: boolean;
+  suppressDragTransform?: boolean;
+  mutedWhileDragging?: boolean;
 };
 
 const dotMeter = (trustDots: number): string => {
@@ -26,9 +30,25 @@ const dotMeter = (trustDots: number): string => {
   return `${filled}${empty}`;
 };
 
-export const Card = ({ card, selected, assignedSlot, heatLens, position, boardZoom, zIndex, onSelect }: CardProps): ReactElement => {
+export const Card = ({
+  card,
+  selected,
+  assignedSlot,
+  heatLens,
+  position,
+  boardZoom,
+  zIndex,
+  onSelect,
+  interactive = true,
+  dragOverlay = false,
+  suppressDragTransform = false,
+  mutedWhileDragging = false,
+}: CardProps): ReactElement => {
+  const draggableId = interactive ? card.id : `overlay-${card.id}`;
+
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: card.id,
+    id: draggableId,
+    disabled: !interactive,
     data: {
       cardId: card.id,
       title: card.title,
@@ -45,11 +65,13 @@ export const Card = ({ card, selected, assignedSlot, heatLens, position, boardZo
     });
   };
 
-  const dragX = transform?.x ?? 0;
-  const dragY = transform?.y ?? 0;
+  const dragX = suppressDragTransform ? 0 : transform?.x ?? 0;
+  const dragY = suppressDragTransform ? 0 : transform?.y ?? 0;
   const adjustedDragX = dragX / boardZoom;
   const adjustedDragY = dragY / boardZoom;
   const notesInputId = `${card.id}-notes`;
+  const isActiveDragCard = interactive && isDragging;
+  const shouldAnimateDrag = isActiveDragCard && !suppressDragTransform;
 
   const cardGlow = useMemo((): string => {
     if (assignedSlot !== null) {
@@ -65,31 +87,36 @@ export const Card = ({ card, selected, assignedSlot, heatLens, position, boardZo
 
   const hasDragOffset = adjustedDragX !== 0 || adjustedDragY !== 0;
   const rootTransform = hasDragOffset
-    ? `translate(${adjustedDragX}px, ${adjustedDragY}px)${isDragging ? ' scale(1.04) rotate(1.15deg)' : ''}`
-    : isDragging
+    ? `translate(${adjustedDragX}px, ${adjustedDragY}px)${shouldAnimateDrag ? ' scale(1.04) rotate(1.15deg)' : ''}`
+    : shouldAnimateDrag
       ? 'scale(1.04) rotate(1.15deg)'
       : undefined;
 
   const rootStyle: CSSProperties = {
-    left: position.x,
-    top: position.y,
+    left: dragOverlay ? 0 : position.x,
+    top: dragOverlay ? 0 : position.y,
     zIndex,
     transformOrigin: 'top left',
     transform: rootTransform,
     boxShadow: cardGlow,
+    opacity: mutedWhileDragging ? 0.22 : 1,
   };
 
   return (
     <article
       ref={setNodeRef}
-      {...attributes}
-      {...listeners}
+      {...(interactive ? attributes : {})}
+      {...(interactive ? listeners : {})}
       data-card-root="true"
       className={`board-card board-card--${card.cardType} board-card--heat-${heatLens} ${isFlipped ? 'board-card--flipped' : ''} ${
-        isDragging ? 'board-card--is-dragging' : ''
-      }`}
+        isActiveDragCard ? 'board-card--is-dragging' : ''
+      } ${dragOverlay ? 'board-card--drag-overlay' : ''} ${mutedWhileDragging ? 'board-card--muted' : ''}`}
       style={rootStyle}
       onClick={(): void => {
+        if (!interactive) {
+          return;
+        }
+
         onSelect(card.id);
       }}
     >
