@@ -154,14 +154,14 @@ const resourceSeeds = (): readonly SeedResource[] => {
     },
     {
       type: 'evidence',
-      amount: 0,
+      amount: 2,
       decayRate: 0,
       name: 'Evidence',
       description: 'Paper that can ruin a quiet life.',
     },
     {
       type: 'cleanCash',
-      amount: 0,
+      amount: 3,
       decayRate: 0,
       name: 'Clean Cash',
       description: 'Money that can stand sunlight.',
@@ -196,6 +196,16 @@ const foundationPersonSeeds = (): readonly SeedBoardCard[] => {
       cardType: 'person',
       trustDots: 1,
       stateLabel: 'Watching',
+      decaying: false,
+    },
+    {
+      cardFace: 'delia-cross',
+      name: 'Delia Cross',
+      subtitle: 'Night Auditor / Freight Office',
+      description: 'Delia closes the books after midnight and remembers every number by morning.',
+      cardType: 'person',
+      trustDots: 1,
+      stateLabel: 'Known by Name',
       decaying: false,
     },
   ];

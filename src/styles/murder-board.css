@@ -541,6 +541,11 @@
 .board-card__content {
   margin-top: 0.4rem;
   flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 0.14rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(184, 150, 62, 0.65) rgba(18, 17, 11, 0.52);
 }
 
 .board-card__content h3 {

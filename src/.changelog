@@ -9,6 +9,34 @@ This file tracks source edits made in this workspace and should be continuously 
 
 ## Edit Log
 
+### Edit 007D - Front Card Content Overflow Guard
+**Scope**
+- Fixed front-face card clipping where long flavor text could push action buttons outside the visible card bounds.
+
+**Files Updated**
+- `src/styles/murder-board.css`
+
+**Key Results**
+- Updated `.board-card__content` to be a bounded, scrollable flex area (`min-height: 0`, `overflow: auto`, thin scrollbar styling).
+- Preserved fixed card dimensions (`--card-width: 160px`, `--card-height: 240px`) while keeping `Open Dossier` / `Flip` controls visible.
+
+---
+
+### Edit 007C - Foundation Seed Rebalance and Third Person Seed
+**Scope**
+- Applied pending foundation seed updates that were not included in `phase3fixes4`.
+
+**Files Updated**
+- `src/data/bartholomeu.ts`
+- `src/ecs/world.ts`
+
+**Key Results**
+- Updated `BARTHOLOMEU_START.resources` to stronger opening values: cash 12, muscle 4, intel 3, favors 3, gingaPoints 2.
+- Updated `resourceSeeds()` fixed amounts for non-decaying stacks: `evidence` now 2, `cleanCash` now 3.
+- Added third foundation person seed: **Delia Cross** (`delia-cross`) in `foundationPersonSeeds()`.
+
+---
+
 ### Edit 007B - Multi-Card Verb Slot Model
 **Scope**
 - Implemented multi-card verb slot requirements end-to-end across static data, UI slot state, and verb resolution payloads.
