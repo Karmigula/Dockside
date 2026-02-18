@@ -309,7 +309,6 @@
   width: 1px;
   height: 1px;
   overflow: visible;
-  transform-origin: top left;
   will-change: transform;
 }
 

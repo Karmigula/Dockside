@@ -486,7 +486,9 @@ export const MurderBoard = (): ReactElement => {
           >
             <motion.div
               className="board-canvas__stage"
-              style={{ x: panX, y: panY, zoom }}
+              style={{ transformOrigin: 'top left' }}
+              animate={{ x: panX, y: panY, scale: zoom }}
+              transition={{ type: 'tween', ease: 'linear', duration: 0 }}
             >
               {PHASE_TWO_BOARD_CARDS.map((card) => {
                 const cardPosition = cardPositions[card.id];

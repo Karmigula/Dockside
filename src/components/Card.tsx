@@ -76,6 +76,7 @@ export const Card = ({ card, selected, assignedSlot, position, boardZoom, zIndex
       {...listeners}
       data-card-root="true"
       className={`board-card board-card--${card.cardType}`}
+      style={{ transformOrigin: 'top left' }}
       onClick={(): void => {
         onSelect(card.id);
       }}
