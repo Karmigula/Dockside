@@ -190,6 +190,8 @@ export const PHASE_TWO_VERB_SLOTS = [
   },
 ] as const satisfies readonly VerbSlotModel[];
 
+export const FOUNDATION_VERB_SLOTS = PHASE_TWO_VERB_SLOTS;
+
 export const PHASE_TWO_EVENT_LOG_SEED = [
   {
     id: 'seed-1',
@@ -207,3 +209,5 @@ export const PHASE_TWO_EVENT_LOG_SEED = [
     line: 'Jeffries keeps his head down and his options open.',
   },
 ] as const satisfies readonly EventLogSeed[];
+
+export const FOUNDATION_EVENT_LOG_SEED = PHASE_TWO_EVENT_LOG_SEED;

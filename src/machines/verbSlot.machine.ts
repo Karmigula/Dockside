@@ -6,6 +6,12 @@ type VerbSlotMachineInput = {
   slotId: ActiveVerbSlotId;
   durationMs: number;
   cooldownMs?: number;
+  onComplete?: (signal: {
+    token: number;
+    slotId: ActiveVerbSlotId;
+    cardId: string;
+    cardTitle: string;
+  }) => void;
 };
 
 type VerbSlotMachineContext = {
@@ -13,12 +19,13 @@ type VerbSlotMachineContext = {
   durationMs: number;
   remainingMs: number;
   cooldownMs: number;
+  queuedToken: number | null;
   queuedCardId: string | null;
   queuedCardTitle: string | null;
 };
 
 type VerbSlotMachineEvent =
-  | { type: 'DROP_CARD'; cardId: string; cardTitle: string }
+  | { type: 'DROP_CARD'; token: number; cardId: string; cardTitle: string }
   | { type: 'RESET' };
 
 const SLOT_TICK_MS = 120;
@@ -27,6 +34,7 @@ const resetContext = (context: VerbSlotMachineContext): VerbSlotMachineContext =
   return {
     ...context,
     remainingMs: context.durationMs,
+    queuedToken: null,
     queuedCardId: null,
     queuedCardTitle: null,
   };
@@ -46,6 +54,25 @@ export const createVerbSlotMachine = (input: VerbSlotMachineInput) => {
         return context.cooldownMs;
       },
     },
+    actions: {
+      emitCompletion: ({ context }): void => {
+        if (
+          context.queuedToken === null ||
+          context.queuedCardId === null ||
+          context.queuedCardTitle === null ||
+          input.onComplete === undefined
+        ) {
+          return;
+        }
+
+        input.onComplete({
+          token: context.queuedToken,
+          slotId: context.slotId,
+          cardId: context.queuedCardId,
+          cardTitle: context.queuedCardTitle,
+        });
+      },
+    },
   }).createMachine({
     id: `verb-slot-${input.slotId}`,
     context: {
@@ -53,6 +80,7 @@ export const createVerbSlotMachine = (input: VerbSlotMachineInput) => {
       durationMs: input.durationMs,
       remainingMs: input.durationMs,
       cooldownMs,
+      queuedToken: null,
       queuedCardId: null,
       queuedCardTitle: null,
     },
@@ -65,6 +93,7 @@ export const createVerbSlotMachine = (input: VerbSlotMachineInput) => {
             actions: assign(({ context, event }): VerbSlotMachineContext => {
               return {
                 ...context,
+                queuedToken: event.token,
                 queuedCardId: event.cardId,
                 queuedCardTitle: event.cardTitle,
                 remainingMs: context.durationMs,
@@ -110,6 +139,7 @@ export const createVerbSlotMachine = (input: VerbSlotMachineInput) => {
             actions: assign(({ context, event }): VerbSlotMachineContext => {
               return {
                 ...context,
+                queuedToken: event.token,
                 queuedCardId: event.cardId,
                 queuedCardTitle: event.cardTitle,
                 remainingMs: context.durationMs,
@@ -125,6 +155,9 @@ export const createVerbSlotMachine = (input: VerbSlotMachineInput) => {
         },
       },
       cooldown: {
+        entry: {
+          type: 'emitCompletion',
+        },
         after: {
           cooldownDelay: {
             target: 'idle',
@@ -145,6 +178,7 @@ export const createVerbSlotMachine = (input: VerbSlotMachineInput) => {
             actions: assign(({ context, event }): VerbSlotMachineContext => {
               return {
                 ...context,
+                queuedToken: event.token,
                 queuedCardId: event.cardId,
                 queuedCardTitle: event.cardTitle,
                 remainingMs: context.durationMs,

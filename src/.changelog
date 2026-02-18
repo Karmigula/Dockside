@@ -1,0 +1,121 @@
+# Dockside Source Changelog
+
+This file tracks source edits made in this workspace and should be continuously updated after every edit batch.
+
+## Update Rule
+- Add a new entry at the top under `Edit Log` for each completed edit batch.
+- Include: scope, files touched, and outcome.
+- Keep prior entries unchanged except to correct factual errors.
+
+## Edit Log
+
+### Edit 004 - Phase 3 Stability and Architecture Corrections
+**Scope**
+- Resolved critical architecture and correctness issues raised in deep review.
+- Shifted board rendering to ECS-driven snapshot cards and hardened runtime/store integration.
+
+**Files Updated**
+- `src/components/MurderBoard.tsx`
+- `src/components/Card.tsx`
+- `src/components/VerbSlot.tsx`
+- `src/machines/verbSlot.machine.ts`
+- `src/store/gameStore.ts`
+- `src/store/verbStore.ts`
+- `src/ecs/world.ts`
+- `src/ecs/systems/verb.system.ts`
+- `src/ecs/systems/__tests__/verb.system.test.ts`
+
+**Key Results**
+- Murder Board header copy now reflects Phase 3 live runtime state.
+- Board cards are now sourced from ECS `FoundationSnapshot.boardCards` (via Zustand), not static `PHASE_TWO_BOARD_CARDS` fixtures.
+- Work/Scheme resolution now uses pure outcome calculation with centralized ECS effect application.
+- Added Scheme resolution path with explicit cash/heat outcomes and tests.
+- Completion dispatch moved into XState machine cooldown entry for one-time firing per cycle.
+- Added strict token guard for `DROP_CARD` effect to prevent duplicate sends in Strict Mode behavior.
+- Replaced verb queue dequeue-and-clear with peek + acknowledge flow to avoid read/clear race windows.
+- Added global singleton strategy in `gameStore` to reduce HMR ghost-loop risk.
+- Heat lens thresholds now derive from HeatSystem tier logic instead of ad-hoc weighted constants.
+- Snapshot now includes ECS-projected board cards; location IDs are normalized for robust district matching.
+- Street-wire seed entries are cleared on successful simulation boot.
+- Initial zoom defaults now match min zoom baseline to avoid first-frame zoom snap.
+
+---
+
+### Edit 003 - Phase 3 ECS <-> UI Bridge (commit: d53f9e3)
+**Scope**
+- Connected ECS simulation state to React via Zustand.
+- Added UI -> ECS verb action queueing and ECS verb resolution.
+- Wired Work verb end-to-end and added heat lens visual mapping.
+
+**Files Added**
+- `src/store/gameStore.ts`
+- `src/store/verbStore.ts`
+- `src/ecs/systems/verb.system.ts`
+- `src/ecs/systems/__tests__/verb.system.test.ts`
+
+**Files Updated**
+- `src/App.tsx`
+- `src/components/MurderBoard.tsx`
+- `src/components/VerbSlot.tsx`
+- `src/components/Card.tsx`
+- `src/ecs/world.ts`
+- `src/ecs/systems/resource.system.ts`
+- `src/styles/murder-board.css`
+
+**Key Results**
+- `gameStore` boots `bootDocksideSimulation` once and exposes reactive `FoundationSnapshot` data.
+- `onTick` handling is debounced with `requestAnimationFrame` semantics.
+- `verbStore` now carries completed verb actions from UI timers.
+- New `VerbSystem` consumes queued actions each tick and resolves outcomes.
+- Work verb resolution implemented: valid location work increments Jeffries cash.
+- Event log receives verb resolution lines through store callbacks.
+- Card heat lens classes now respond to local/federal heat values.
+- `ResourceSystem` no longer depends on `timeQuery.getFirst()`.
+- Validation completed: lint/test/build passing.
+
+---
+
+### Edit 002 - Phase 2 Interaction, Layout, and Readability Pass
+**Scope**
+- Improved board interaction quality and visual clarity.
+- Fixed drag/drop behavior issues and card replacement behavior.
+- Improved no-scroll viewport fit and reduced text blur while zooming.
+
+**Files Updated (major)**
+- `src/components/MurderBoard.tsx`
+- `src/components/Card.tsx`
+- `src/components/VerbSlot.tsx`
+- `src/machines/verbSlot.machine.ts`
+- `src/styles/murder-board.css`
+- `src/index.css`
+
+**Key Results**
+- Board interaction supports freeform placement and panning without text selection.
+- Strict slot collision logic requires true overlap, not loose horizontal alignment.
+- Dropping a card into an occupied slot replaces the prior card assignment.
+- Card back includes editable notes and a visible Flip Back button.
+- Dragged cards render above surrounding panels and snap back if dropped off-canvas.
+- Custom scrollbar styling added for slot/event/card-back scroll regions.
+- Zoom implementation adjusted for readability and smoother clarity behavior.
+- Page-level scrolling prevented while preserving board interactivity.
+
+---
+
+### Edit 001 - Phase 2 Murder Board Foundation
+**Scope**
+- Built the initial static Murder Board UI scaffold and interactions.
+
+**Files Added/Updated (major)**
+- `src/components/MurderBoard.tsx`
+- `src/components/Card.tsx`
+- `src/components/VerbSlot.tsx`
+- `src/components/EventLog.tsx`
+- `src/machines/verbSlot.machine.ts`
+- `src/data/cards/phase2.board.ts`
+- `src/styles/murder-board.css`
+
+**Key Results**
+- Introduced board canvas, draggable cards, verb slots, and event log presentation.
+- Added XState verb-slot machine with timer/cooldown behaviors.
+- Added dnd-kit integration for card-to-slot interactions.
+- Established noir visual language and board component structure.

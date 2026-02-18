@@ -7,7 +7,8 @@ export type CompletedVerbAction = VerbAction;
 type VerbStoreState = {
   pendingActions: CompletedVerbAction[];
   enqueueAction: (action: CompletedVerbAction) => void;
-  dequeueActions: () => CompletedVerbAction[];
+  peekActions: () => CompletedVerbAction[];
+  acknowledgeActions: (actionIds: readonly string[]) => void;
   clear: () => void;
 };
 
@@ -21,10 +22,23 @@ export const useVerbStore = create<VerbStoreState>((set, get) => {
         };
       });
     },
-    dequeueActions: (): CompletedVerbAction[] => {
-      const actions = [...get().pendingActions];
-      set({ pendingActions: [] });
-      return actions;
+    peekActions: (): CompletedVerbAction[] => {
+      return [...get().pendingActions];
+    },
+    acknowledgeActions: (actionIds): void => {
+      if (actionIds.length === 0) {
+        return;
+      }
+
+      const acknowledged = new Set(actionIds);
+
+      set((state): Pick<VerbStoreState, 'pendingActions'> => {
+        return {
+          pendingActions: state.pendingActions.filter((action): boolean => {
+            return !acknowledged.has(action.id);
+          }),
+        };
+      });
     },
     clear: (): void => {
       set({ pendingActions: [] });
@@ -36,6 +50,10 @@ export const queueCompletedVerbAction = (action: CompletedVerbAction): void => {
   useVerbStore.getState().enqueueAction(action);
 };
 
-export const dequeueCompletedVerbActions = (): CompletedVerbAction[] => {
-  return useVerbStore.getState().dequeueActions();
+export const peekCompletedVerbActions = (): CompletedVerbAction[] => {
+  return useVerbStore.getState().peekActions();
+};
+
+export const acknowledgeCompletedVerbActions = (actionIds: readonly string[]): void => {
+  useVerbStore.getState().acknowledgeActions(actionIds);
 };

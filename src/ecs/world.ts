@@ -15,7 +15,7 @@ import { createIdentitySystem } from './systems/identity.system';
 import { createResourceSystem } from './systems/resource.system';
 import { createTimeSystem } from './systems/time.system';
 import { createVerbSystem, type VerbResolution, type VerbSystemOptions } from './systems/verb.system';
-import type { ResourceType } from './types';
+import type { CardType, ResourceType } from './types';
 
 export const FOUNDATION_TICK_RATE_HZ = 60;
 
@@ -25,6 +25,33 @@ type SeedResource = {
   decayRate: number;
   name: string;
   description: string;
+};
+
+type SeedBoardCard = {
+  cardFace: string;
+  name: string;
+  subtitle: string;
+  description: string;
+  cardType: Exclude<CardType, 'asset' | 'resource' | 'location'>;
+  trustDots: number;
+  stateLabel: string;
+  decaying: boolean;
+};
+
+type FoundationBoardCardType = Exclude<CardType, 'asset'>;
+
+type FoundationBoardCardCluster = 'people' | 'locations' | 'situations' | 'resources';
+
+export type FoundationBoardCard = {
+  id: string;
+  title: string;
+  subtitle: string;
+  cardType: FoundationBoardCardType;
+  flavor: string;
+  trustDots: number;
+  stateLabel: string;
+  decaying: boolean;
+  cluster: FoundationBoardCardCluster;
 };
 
 export type FoundationSnapshot = {
@@ -44,6 +71,7 @@ export type FoundationSnapshot = {
     respect: number;
   };
   resources: Record<ResourceType, number>;
+  boardCards: FoundationBoardCard[];
 };
 
 export type DocksideSimulationOptions = {
@@ -148,6 +176,64 @@ const resourceSeeds = (): readonly SeedResource[] => {
   ];
 };
 
+const foundationPersonSeeds = (): readonly SeedBoardCard[] => {
+  return [
+    {
+      cardFace: 'ray-kowalski',
+      name: 'Ray Kowalski',
+      subtitle: 'Dock Foreman / Local 299',
+      description: 'Ray owes money and time. Both clocks are louder every night.',
+      cardType: 'person',
+      trustDots: 2,
+      stateLabel: 'Contacted',
+      decaying: false,
+    },
+    {
+      cardFace: 'sal-marchetti',
+      name: 'Sal Marchetti',
+      subtitle: 'Bookmaker / River Row',
+      description: 'He smiles with his hands in his pockets. Nobody asks what those hands hold.',
+      cardType: 'person',
+      trustDots: 1,
+      stateLabel: 'Watching',
+      decaying: false,
+    },
+  ];
+};
+
+const foundationSituationSeeds = (): readonly SeedBoardCard[] => {
+  return [
+    {
+      cardFace: 'shipment-window',
+      name: 'Shipment Looking the Other Way',
+      subtitle: 'Situation Card',
+      description: 'A container shows up Thursday. The manifest is clean. The locks are not.',
+      cardType: 'situation',
+      trustDots: 0,
+      stateLabel: 'Burns in 2 Shifts',
+      decaying: true,
+    },
+    {
+      cardFace: 'unmarked-van',
+      name: 'Unmarked Van, Lot C',
+      subtitle: 'Situation Card',
+      description: 'Someone is moving weight after midnight. You can watch, lift, or sell the story.',
+      cardType: 'situation',
+      trustDots: 0,
+      stateLabel: 'Burns in 1 Shift',
+      decaying: true,
+    },
+  ];
+};
+
+const toKebabFromSnake = (value: string): string => {
+  return value.toLowerCase().replaceAll('_', '-');
+};
+
+const toKebabFromCamel = (value: string): string => {
+  return value.replaceAll(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+};
+
 const initialResourceMap = (): Record<ResourceType, number> => {
   return {
     cash: 0,
@@ -223,6 +309,61 @@ const registerCoreEntities = (preptimeWorld: IPreptimeWorld): void => {
     })
     .build();
 
+  for (const person of foundationPersonSeeds()) {
+    preptimeWorld
+      .buildEntity()
+      .with(EntityIdComponent, { value: nextEntityId() })
+      .with(IdentityComponent, {
+        name: person.name,
+        description: person.description,
+        cardType: person.cardType,
+      })
+      .with(CardStateComponent, {
+        state: { kind: 'idle' },
+      })
+      .with(VisualComponent, {
+        cardFace: person.cardFace,
+        revealed: true,
+        dossierData: {
+          subtitle: person.subtitle,
+          trustDots: person.trustDots,
+          stateLabel: person.stateLabel,
+          decaying: person.decaying,
+        },
+      })
+      .build();
+  }
+
+  for (const situation of foundationSituationSeeds()) {
+    preptimeWorld
+      .buildEntity()
+      .with(EntityIdComponent, { value: nextEntityId() })
+      .with(IdentityComponent, {
+        name: situation.name,
+        description: situation.description,
+        cardType: situation.cardType,
+      })
+      .with(CardStateComponent, {
+        state: situation.decaying
+          ? {
+              kind: 'decaying',
+              decayTimer: 2,
+            }
+          : { kind: 'idle' },
+      })
+      .with(VisualComponent, {
+        cardFace: situation.cardFace,
+        revealed: true,
+        dossierData: {
+          subtitle: situation.subtitle,
+          trustDots: situation.trustDots,
+          stateLabel: situation.stateLabel,
+          decaying: situation.decaying,
+        },
+      })
+      .build();
+  }
+
   for (const resource of resourceSeeds()) {
     preptimeWorld
       .buildEntity()
@@ -239,6 +380,13 @@ const registerCoreEntities = (preptimeWorld: IPreptimeWorld): void => {
       })
       .with(CardStateComponent, {
         state: { kind: 'idle' },
+      })
+      .with(VisualComponent, {
+        cardFace: toKebabFromCamel(resource.type),
+        revealed: true,
+        dossierData: {
+          subtitle: 'Resource Card',
+        },
       })
       .build();
   }
@@ -259,6 +407,13 @@ const registerCoreEntities = (preptimeWorld: IPreptimeWorld): void => {
       })
       .with(CardStateComponent, {
         state: { kind: 'idle' },
+      })
+      .with(VisualComponent, {
+        cardFace: toKebabFromSnake(locationId),
+        revealed: true,
+        dossierData: {
+          subtitle: 'Location Card',
+        },
       })
       .build();
   }
@@ -321,6 +476,141 @@ export const runRuntimeSteps = async (
   }
 };
 
+const clusterRank: Record<FoundationBoardCardCluster, number> = {
+  people: 0,
+  locations: 1,
+  situations: 2,
+  resources: 3,
+};
+
+const resolveBoardCluster = (cardType: FoundationBoardCardType): FoundationBoardCardCluster => {
+  if (cardType === 'person') {
+    return 'people';
+  }
+
+  if (cardType === 'location') {
+    return 'locations';
+  }
+
+  if (cardType === 'situation') {
+    return 'situations';
+  }
+
+  return 'resources';
+};
+
+const resolveBoardCardId = (
+  cardType: FoundationBoardCardType,
+  visualComponent: VisualComponent | undefined,
+  locationComponent: LocationComponent | undefined,
+  resourceComponent: ResourceComponent | undefined,
+  identityComponent: IdentityComponent,
+): string => {
+  if (visualComponent !== undefined && visualComponent.cardFace !== 'blank') {
+    return visualComponent.cardFace;
+  }
+
+  if (cardType === 'location' && locationComponent !== undefined) {
+    return toKebabFromSnake(locationComponent.districtId);
+  }
+
+  if (cardType === 'resource' && resourceComponent !== undefined) {
+    return toKebabFromCamel(resourceComponent.type);
+  }
+
+  return identityComponent.name
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[\s_]+/g, '-')
+    .replaceAll(/[^a-z0-9-]/g, '');
+};
+
+const resolveBoardCardSubtitle = (
+  cardType: FoundationBoardCardType,
+  visualComponent: VisualComponent | undefined,
+): string => {
+  const subtitle = visualComponent?.dossierData.subtitle;
+
+  if (typeof subtitle === 'string' && subtitle.trim().length > 0) {
+    return subtitle;
+  }
+
+  if (cardType === 'location') {
+    return 'Location Card';
+  }
+
+  if (cardType === 'situation') {
+    return 'Situation Card';
+  }
+
+  if (cardType === 'resource') {
+    return 'Resource Card';
+  }
+
+  return 'Person Card';
+};
+
+const resolveBoardStateLabel = (
+  cardType: FoundationBoardCardType,
+  cardStateComponent: CardStateComponent | undefined,
+  locationComponent: LocationComponent | undefined,
+  resourceComponent: ResourceComponent | undefined,
+  visualComponent: VisualComponent | undefined,
+): string => {
+  const dossierStateLabel = visualComponent?.dossierData.stateLabel;
+
+  if (typeof dossierStateLabel === 'string' && dossierStateLabel.trim().length > 0) {
+    return dossierStateLabel;
+  }
+
+  if (cardStateComponent?.state.kind === 'decaying') {
+    return `Burns in ${cardStateComponent.state.decayTimer} Shifts`;
+  }
+
+  if (cardType === 'location' && locationComponent !== undefined) {
+    return locationComponent.unlocked ? 'Unlocked' : 'Locked';
+  }
+
+  if (cardType === 'resource' && resourceComponent !== undefined) {
+    return `Stack x${Math.max(0, Math.floor(resourceComponent.amount))}`;
+  }
+
+  return cardStateComponent?.state.kind === 'inVerbSlot' ? 'In Slot' : 'Idle';
+};
+
+const resolveTrustDots = (visualComponent: VisualComponent | undefined): number => {
+  const trustDots = visualComponent?.dossierData.trustDots;
+
+  if (typeof trustDots !== 'number' || Number.isNaN(trustDots)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(5, Math.round(trustDots)));
+};
+
+const resolveDecaying = (
+  cardType: FoundationBoardCardType,
+  cardStateComponent: CardStateComponent | undefined,
+  resourceComponent: ResourceComponent | undefined,
+  visualComponent: VisualComponent | undefined,
+): boolean => {
+  const dossierDecaying = visualComponent?.dossierData.decaying;
+
+  if (typeof dossierDecaying === 'boolean') {
+    return dossierDecaying;
+  }
+
+  if (cardStateComponent?.state.kind === 'decaying') {
+    return true;
+  }
+
+  if (cardType === 'resource' && resourceComponent !== undefined) {
+    return resourceComponent.decayRate > 0;
+  }
+
+  return false;
+};
+
 export const readFoundationSnapshot = (runtimeWorld: IRuntimeWorld): FoundationSnapshot | null => {
   let timeComponent: TimeComponent | undefined;
   let jeffriesAsset: AssetComponent | undefined;
@@ -328,6 +618,7 @@ export const readFoundationSnapshot = (runtimeWorld: IRuntimeWorld): FoundationS
   let jeffriesReputation: ReputationComponent | undefined;
 
   const resources = initialResourceMap();
+  const boardCards: FoundationBoardCard[] = [];
 
   for (const entity of runtimeWorld.getEntities()) {
     const time = entity.getComponent(TimeComponent);
@@ -339,6 +630,9 @@ export const readFoundationSnapshot = (runtimeWorld: IRuntimeWorld): FoundationS
     const asset = entity.getComponent(AssetComponent);
     const heat = entity.getComponent(HeatComponent);
     const reputation = entity.getComponent(ReputationComponent);
+    const cardStateComponent = entity.getComponent(CardStateComponent);
+    const visualComponent = entity.getComponent(VisualComponent);
+    const locationComponent = entity.getComponent(LocationComponent);
 
     if (identity?.name === BARTHOLOMEU_START.name) {
       jeffriesAsset = asset;
@@ -350,6 +644,30 @@ export const readFoundationSnapshot = (runtimeWorld: IRuntimeWorld): FoundationS
     if (resource !== undefined) {
       resources[resource.type] += resource.amount;
     }
+
+    if (identity === undefined || identity.cardType === 'asset') {
+      continue;
+    }
+
+    const foundationCardType = identity.cardType as FoundationBoardCardType;
+
+    boardCards.push({
+      id: resolveBoardCardId(foundationCardType, visualComponent, locationComponent, resource, identity),
+      title: identity.name,
+      subtitle: resolveBoardCardSubtitle(foundationCardType, visualComponent),
+      cardType: foundationCardType,
+      flavor: identity.description,
+      trustDots: resolveTrustDots(visualComponent),
+      stateLabel: resolveBoardStateLabel(
+        foundationCardType,
+        cardStateComponent,
+        locationComponent,
+        resource,
+        visualComponent,
+      ),
+      decaying: resolveDecaying(foundationCardType, cardStateComponent, resource, visualComponent),
+      cluster: resolveBoardCluster(foundationCardType),
+    });
   }
 
   if (
@@ -362,6 +680,28 @@ export const readFoundationSnapshot = (runtimeWorld: IRuntimeWorld): FoundationS
   }
 
   resources.cash = jeffriesAsset.cash;
+
+  boardCards.push({
+    id: 'cash',
+    title: 'Cash',
+    subtitle: 'Resource Card',
+    cardType: 'resource',
+    flavor: 'Folded bills still warm from honest work and crooked pockets.',
+    trustDots: 0,
+    stateLabel: `Stack x${Math.max(0, Math.floor(jeffriesAsset.cash))}`,
+    decaying: false,
+    cluster: 'resources',
+  });
+
+  boardCards.sort((left, right): number => {
+    const clusterDelta = clusterRank[left.cluster] - clusterRank[right.cluster];
+
+    if (clusterDelta !== 0) {
+      return clusterDelta;
+    }
+
+    return left.title.localeCompare(right.title);
+  });
 
   return {
     tick: timeComponent.totalTicks,
@@ -380,6 +720,7 @@ export const readFoundationSnapshot = (runtimeWorld: IRuntimeWorld): FoundationS
       respect: jeffriesReputation.respect,
     },
     resources,
+    boardCards,
   };
 };
 

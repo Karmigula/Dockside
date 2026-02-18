@@ -110,6 +110,26 @@ const readJeffriesCash = (runtimeWorld: IRuntimeWorld): number => {
   throw new Error('Jeffries AssetComponent not found in runtime world.');
 };
 
+const readJeffriesHeat = (runtimeWorld: IRuntimeWorld): HeatComponent => {
+  for (const entity of runtimeWorld.getEntities()) {
+    const identityComponent = entity.getComponent(IdentityComponent);
+
+    if (identityComponent?.name !== BARTHOLOMEU_START.name) {
+      continue;
+    }
+
+    const heatComponent = entity.getComponent(HeatComponent);
+
+    if (heatComponent === undefined) {
+      break;
+    }
+
+    return heatComponent;
+  }
+
+  throw new Error('Jeffries HeatComponent not found in runtime world.');
+};
+
 const createVerbAction = (overrides: Partial<VerbAction> = {}): VerbAction => {
   return {
     id: 'verb-work-1',
@@ -179,9 +199,43 @@ describe('verb.system', (): void => {
 
     await runtimeWorld.step();
 
-    expect(readJeffriesCash(runtimeWorld)).toBe(BARTHOLOMEU_START.resources.cash);
+    expect(readJeffriesCash(runtimeWorld)).toBe(BARTHOLOMEU_START.resources.cash + 2);
+    expect(readJeffriesHeat(runtimeWorld).localHeat).toBe(BARTHOLOMEU_START.resources.heat.local + 6);
+    expect(readJeffriesHeat(runtimeWorld).federalHeat).toBe(BARTHOLOMEU_START.resources.heat.federal + 2);
     expect(resolutions).toHaveLength(1);
-    expect(resolutions[0]?.tone).toBe('info');
+    expect(resolutions[0]?.tone).toBe('success');
+    expect(resolutions[0]?.cashDelta).toBe(2);
+    expect(resolutions[0]?.localHeatDelta).toBe(6);
+    expect(resolutions[0]?.federalHeatDelta).toBe(2);
+  });
+
+  it('warns and applies no effect when Scheme receives a non-situation card', async (): Promise<void> => {
+    const { runtimeWorld, queuedActions, resolutions } = await createHarness([
+      {
+        districtId: 'the_docks',
+        unlocked: true,
+      },
+    ]);
+
+    queuedActions.push(
+      createVerbAction({
+        id: 'verb-scheme-2',
+        slotId: 'scheme',
+        cardId: 'the-docks',
+        cardTitle: 'The Docks',
+        cardType: 'location',
+      }),
+    );
+
+    await runtimeWorld.step();
+
+    expect(readJeffriesCash(runtimeWorld)).toBe(BARTHOLOMEU_START.resources.cash);
+    expect(readJeffriesHeat(runtimeWorld).localHeat).toBe(BARTHOLOMEU_START.resources.heat.local);
+    expect(readJeffriesHeat(runtimeWorld).federalHeat).toBe(BARTHOLOMEU_START.resources.heat.federal);
+    expect(resolutions).toHaveLength(1);
+    expect(resolutions[0]?.tone).toBe('warning');
     expect(resolutions[0]?.cashDelta).toBe(0);
+    expect(resolutions[0]?.localHeatDelta).toBe(0);
+    expect(resolutions[0]?.federalHeatDelta).toBe(0);
   });
 });

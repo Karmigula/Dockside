@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 import type { EventLogEntry, EventLogTone } from '../components/EventLog';
-import { PHASE_TWO_EVENT_LOG_SEED } from '../data/cards/phase2.board';
+import { FOUNDATION_EVENT_LOG_SEED } from '../data/cards/phase2.board';
 import {
   FOUNDATION_TICK_RATE_HZ,
   bootDocksideSimulation,
@@ -9,7 +9,7 @@ import {
   type FoundationSnapshot,
 } from '../ecs/world';
 import type { VerbResolution } from '../ecs/systems/verb.system';
-import { dequeueCompletedVerbActions } from './verbStore';
+import { acknowledgeCompletedVerbActions, peekCompletedVerbActions } from './verbStore';
 
 const MAX_STREET_WIRE_ENTRIES = 16;
 
@@ -21,6 +21,7 @@ type GameStoreState = {
   time: FoundationSnapshot['time'];
   jeffries: FoundationSnapshot['jeffries'];
   resources: FoundationSnapshot['resources'];
+  boardCards: FoundationSnapshot['boardCards'];
   streetWireEntries: EventLogEntry[];
   simulationError: string | null;
   startSimulation: () => Promise<void>;
@@ -29,13 +30,42 @@ type GameStoreState = {
   recordVerbResolution: (resolution: VerbResolution) => void;
 };
 
-let simulationHandle: DocksideSimulationHandle | null = null;
-let bootInFlight: Promise<void> | null = null;
-let queuedSnapshot: FoundationSnapshot | null = null;
-let snapshotFrameToken: number | null = null;
+type GameStoreSingleton = {
+  simulationHandle: DocksideSimulationHandle | null;
+  bootInFlight: Promise<void> | null;
+  queuedSnapshot: FoundationSnapshot | null;
+  snapshotFrameToken: number | null;
+  inflightVerbActionIds: string[];
+  resolvedVerbActionIds: Set<string>;
+};
+
+const GAME_STORE_SINGLETON_KEY = '__dockside_game_store_singleton__';
+
+type GlobalWithGameStoreSingleton = typeof globalThis & {
+  [GAME_STORE_SINGLETON_KEY]?: GameStoreSingleton;
+};
+
+const getGameStoreSingleton = (): GameStoreSingleton => {
+  const globalWithSingleton = globalThis as GlobalWithGameStoreSingleton;
+
+  if (globalWithSingleton[GAME_STORE_SINGLETON_KEY] === undefined) {
+    globalWithSingleton[GAME_STORE_SINGLETON_KEY] = {
+      simulationHandle: null,
+      bootInFlight: null,
+      queuedSnapshot: null,
+      snapshotFrameToken: null,
+      inflightVerbActionIds: [],
+      resolvedVerbActionIds: new Set<string>(),
+    };
+  }
+
+  return globalWithSingleton[GAME_STORE_SINGLETON_KEY];
+};
+
+const singleton = getGameStoreSingleton();
 
 const buildSeedStreetWire = (): EventLogEntry[] => {
-  return PHASE_TWO_EVENT_LOG_SEED.map((seed, index): EventLogEntry => {
+  return FOUNDATION_EVENT_LOG_SEED.map((seed, index): EventLogEntry => {
     const minute = index + 1;
 
     return {
@@ -73,6 +103,8 @@ const defaultResources: FoundationSnapshot['resources'] = {
   gingaPoints: 0,
 };
 
+const defaultBoardCards: FoundationSnapshot['boardCards'] = [];
+
 const formatClockStamp = (): string => {
   return new Date().toLocaleTimeString([], {
     hour: '2-digit',
@@ -104,20 +136,21 @@ const cancelSnapshotFlush = (token: number): void => {
 
 export const useGameStore = create<GameStoreState>((set, get) => {
   const flushQueuedSnapshot = (): void => {
-    snapshotFrameToken = null;
+    singleton.snapshotFrameToken = null;
 
-    if (queuedSnapshot === null) {
+    if (singleton.queuedSnapshot === null) {
       return;
     }
 
-    const snapshot = queuedSnapshot;
-    queuedSnapshot = null;
+    const snapshot = singleton.queuedSnapshot;
+    singleton.queuedSnapshot = null;
 
     set({
       tick: snapshot.tick,
       time: snapshot.time,
       jeffries: snapshot.jeffries,
       resources: snapshot.resources,
+      boardCards: snapshot.boardCards,
     });
   };
 
@@ -127,66 +160,104 @@ export const useGameStore = create<GameStoreState>((set, get) => {
     time: defaultTime,
     jeffries: defaultJeffries,
     resources: defaultResources,
+    boardCards: defaultBoardCards,
     streetWireEntries: buildSeedStreetWire(),
     simulationError: null,
 
     startSimulation: async (): Promise<void> => {
-      if (simulationHandle !== null) {
+      if (singleton.simulationHandle !== null) {
         set({ status: 'running', simulationError: null });
         return;
       }
 
-      if (bootInFlight !== null) {
-        await bootInFlight;
+      if (singleton.bootInFlight !== null) {
+        await singleton.bootInFlight;
         return;
       }
 
       set({ status: 'booting', simulationError: null });
 
-      bootInFlight = (async (): Promise<void> => {
+      singleton.bootInFlight = (async (): Promise<void> => {
         try {
-          simulationHandle = await bootDocksideSimulation({
+          singleton.simulationHandle = await bootDocksideSimulation({
             autoStart: true,
             tickRateHz: FOUNDATION_TICK_RATE_HZ,
-            dequeueVerbActions: dequeueCompletedVerbActions,
+            dequeueVerbActions: (): ReturnType<typeof peekCompletedVerbActions> => {
+              if (singleton.inflightVerbActionIds.length > 0) {
+                return [];
+              }
+
+              const pendingActions = peekCompletedVerbActions();
+
+              if (pendingActions.length === 0) {
+                return [];
+              }
+
+              singleton.inflightVerbActionIds = pendingActions.map((action): string => {
+                return action.id;
+              });
+              singleton.resolvedVerbActionIds.clear();
+
+              return pendingActions;
+            },
             onVerbResolved: (resolution): void => {
+              if (singleton.inflightVerbActionIds.length > 0) {
+                singleton.resolvedVerbActionIds.add(resolution.actionId);
+
+                const allResolved = singleton.inflightVerbActionIds.every((actionId): boolean => {
+                  return singleton.resolvedVerbActionIds.has(actionId);
+                });
+
+                if (allResolved) {
+                  acknowledgeCompletedVerbActions(singleton.inflightVerbActionIds);
+                  singleton.inflightVerbActionIds = [];
+                  singleton.resolvedVerbActionIds.clear();
+                }
+              }
+
               get().recordVerbResolution(resolution);
             },
             onTick: (snapshot): void => {
-              queuedSnapshot = snapshot;
+              singleton.queuedSnapshot = snapshot;
 
-              if (snapshotFrameToken !== null) {
+              if (singleton.snapshotFrameToken !== null) {
                 return;
               }
 
-              snapshotFrameToken = scheduleSnapshotFlush(flushQueuedSnapshot);
+              singleton.snapshotFrameToken = scheduleSnapshotFlush(flushQueuedSnapshot);
             },
           });
 
-          set({ status: 'running', simulationError: null });
+          set({
+            status: 'running',
+            simulationError: null,
+            streetWireEntries: [],
+          });
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Simulation failed to start.';
           set({ status: 'error', simulationError: message });
           throw error;
         } finally {
-          bootInFlight = null;
+          singleton.bootInFlight = null;
         }
       })();
 
-      await bootInFlight;
+      await singleton.bootInFlight;
     },
 
     stopSimulation: (): void => {
-      if (snapshotFrameToken !== null) {
-        cancelSnapshotFlush(snapshotFrameToken);
-        snapshotFrameToken = null;
+      if (singleton.snapshotFrameToken !== null) {
+        cancelSnapshotFlush(singleton.snapshotFrameToken);
+        singleton.snapshotFrameToken = null;
       }
 
-      queuedSnapshot = null;
+      singleton.queuedSnapshot = null;
+      singleton.inflightVerbActionIds = [];
+      singleton.resolvedVerbActionIds.clear();
 
-      if (simulationHandle !== null) {
-        simulationHandle.stop();
-        simulationHandle = null;
+      if (singleton.simulationHandle !== null) {
+        singleton.simulationHandle.stop();
+        singleton.simulationHandle = null;
       }
 
       set({ status: 'idle' });

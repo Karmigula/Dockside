@@ -44,16 +44,27 @@ type JeffriesRuntimeState = {
 
 const EMPTY_ACTIONS: readonly VerbAction[] = [];
 
-const toDistrictId = (cardId: string): string => {
-  return cardId.replaceAll('-', '_');
+const normalizeDistrictId = (value: string): string => {
+  return value.trim().toLowerCase().replaceAll('-', '_').replaceAll(' ', '_');
+};
+
+const clampHeatValue = (value: number): number => {
+  if (value < 0) {
+    return 0;
+  }
+
+  if (value > 100) {
+    return 100;
+  }
+
+  return value;
 };
 
 const resolveWorkVerb = (
   action: VerbAction,
-  jeffries: JeffriesRuntimeState,
   unlockedDistricts: ReadonlySet<string>,
 ): VerbResolution => {
-  const districtId = toDistrictId(action.cardId);
+  const districtId = normalizeDistrictId(action.cardId);
 
   if (action.cardType !== 'location') {
     return {
@@ -87,8 +98,6 @@ const resolveWorkVerb = (
     };
   }
 
-  jeffries.assetComponent.cash += 1;
-
   return {
     id: `verb-resolution-${action.id}`,
     actionId: action.id,
@@ -104,13 +113,82 @@ const resolveWorkVerb = (
   };
 };
 
+const resolveSchemeVerb = (action: VerbAction): VerbResolution => {
+  if (action.cardType !== 'situation') {
+    return {
+      id: `verb-resolution-${action.id}`,
+      actionId: action.id,
+      slotId: action.slotId,
+      cardId: action.cardId,
+      cardTitle: action.cardTitle,
+      tone: 'warning',
+      line: `${action.cardTitle} is the wrong kind of leverage. Scheme needs a situation card.`,
+      cashDelta: 0,
+      localHeatDelta: 0,
+      federalHeatDelta: 0,
+      resolvedAtMs: Date.now(),
+    };
+  }
+
+  if (action.cardId === 'shipment-window') {
+    return {
+      id: `verb-resolution-${action.id}`,
+      actionId: action.id,
+      slotId: action.slotId,
+      cardId: action.cardId,
+      cardTitle: action.cardTitle,
+      tone: 'success',
+      line: `${action.cardTitle} moved clean on paper. Jeffries clears +2 cash, but the harbor cops smell smoke.`,
+      cashDelta: 2,
+      localHeatDelta: 6,
+      federalHeatDelta: 2,
+      resolvedAtMs: Date.now(),
+    };
+  }
+
+  return {
+    id: `verb-resolution-${action.id}`,
+    actionId: action.id,
+    slotId: action.slotId,
+    cardId: action.cardId,
+    cardTitle: action.cardTitle,
+    tone: 'info',
+    line: `${action.cardTitle} pays a short edge: +1 cash, +2 local heat.`,
+    cashDelta: 1,
+    localHeatDelta: 2,
+    federalHeatDelta: 0,
+    resolvedAtMs: Date.now(),
+  };
+};
+
+const applyResolution = (resolution: VerbResolution, jeffries: JeffriesRuntimeState): void => {
+  if (resolution.cashDelta !== 0) {
+    jeffries.assetComponent.cash += resolution.cashDelta;
+  }
+
+  if (resolution.localHeatDelta !== 0) {
+    jeffries.heatComponent.localHeat = clampHeatValue(
+      jeffries.heatComponent.localHeat + resolution.localHeatDelta,
+    );
+  }
+
+  if (resolution.federalHeatDelta !== 0) {
+    jeffries.heatComponent.federalHeat = clampHeatValue(
+      jeffries.heatComponent.federalHeat + resolution.federalHeatDelta,
+    );
+  }
+};
+
 const resolveAction = (
   action: VerbAction,
-  jeffries: JeffriesRuntimeState,
   unlockedDistricts: ReadonlySet<string>,
 ): VerbResolution => {
   if (action.slotId === 'work') {
-    return resolveWorkVerb(action, jeffries, unlockedDistricts);
+    return resolveWorkVerb(action, unlockedDistricts);
+  }
+
+  if (action.slotId === 'scheme') {
+    return resolveSchemeVerb(action);
   }
 
   return {
@@ -171,11 +249,13 @@ const createVerbSystemBuilder = ({ dequeueVerbActions, onResolved }: VerbSystemO
           return;
         }
 
-        unlockedDistricts.add(locationComponent.districtId);
+        unlockedDistricts.add(normalizeDistrictId(locationComponent.districtId));
       });
 
       for (const action of pendingActions) {
-        const resolution = resolveAction(action, jeffriesState, unlockedDistricts);
+        const resolution = resolveAction(action, unlockedDistricts);
+
+        applyResolution(resolution, jeffriesState);
 
         if (onResolved !== undefined) {
           onResolved(resolution);

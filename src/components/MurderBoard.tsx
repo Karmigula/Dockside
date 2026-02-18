@@ -11,6 +11,7 @@ import {
 } from '@dnd-kit/core';
 import { motion } from 'framer-motion';
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -21,12 +22,11 @@ import {
 } from 'react';
 
 import {
-  PHASE_TWO_BOARD_CARDS,
-  PHASE_TWO_VERB_SLOTS,
+  FOUNDATION_VERB_SLOTS,
   type ActiveVerbSlotId,
-  type BoardCardCluster,
-  type BoardCardModel,
 } from '../data/cards/phase2.board';
+import { getHeatTier } from '../ecs/systems/heat.system';
+import type { FoundationBoardCard } from '../ecs/world';
 import { Card } from './Card';
 import { EventLog, type EventLogEntry } from './EventLog';
 import { VerbSlot, type VerbSlotCompletionSignal, type VerbSlotDropSignal } from './VerbSlot';
@@ -58,8 +58,11 @@ type BoardCardPosition = {
   y: number;
 };
 
+type BoardCardCluster = FoundationBoardCard['cluster'];
+
 const MIN_INTERACTIVE_ZOOM = 0.1;
 const ABSOLUTE_MIN_ZOOM = 0.68;
+const DEFAULT_ZOOM = 0.72;
 const FIT_PADDING = 24;
 const BOARD_SURFACE_WIDTH = 2160;
 const BOARD_SURFACE_HEIGHT = 1280;
@@ -73,7 +76,7 @@ const initialClusterOrigin: Record<BoardCardCluster, BoardCardPosition> = {
   resources: { x: 1680, y: 170 },
 };
 
-const buildInitialCardPositions = (cards: readonly BoardCardModel[]): Record<string, BoardCardPosition> => {
+const buildInitialCardPositions = (cards: readonly FoundationBoardCard[]): Record<string, BoardCardPosition> => {
   const byClusterIndex: Record<BoardCardCluster, number> = {
     people: 0,
     locations: 0,
@@ -102,7 +105,7 @@ const buildInitialCardPositions = (cards: readonly BoardCardModel[]): Record<str
   );
 };
 
-const buildInitialCardZIndices = (cards: readonly BoardCardModel[]): Record<string, number> => {
+const buildInitialCardZIndices = (cards: readonly FoundationBoardCard[]): Record<string, number> => {
   return cards.reduce(
     (layers, card, index): Record<string, number> => {
       return {
@@ -134,31 +137,19 @@ const toneForSlot = (slotId: ActiveVerbSlotId): 'warning' | 'info' | 'success' =
   return 'success';
 };
 
-const cardHeatWeightByType: Record<BoardCardModel['cardType'], { local: number; federal: number }> = {
-  person: { local: 1, federal: 0.45 },
-  location: { local: 0.7, federal: 0.3 },
-  resource: { local: 0.45, federal: 0.55 },
-  situation: { local: 0.85, federal: 0.8 },
-};
+const resolveCardHeatLens = (localHeat: number, federalHeat: number): 'clear' | 'local' | 'federal' | 'crisis' => {
+  const localTier = getHeatTier(localHeat);
+  const federalTier = getHeatTier(federalHeat);
 
-const resolveCardHeatLens = (
-  card: BoardCardModel,
-  localHeat: number,
-  federalHeat: number,
-): 'clear' | 'local' | 'federal' | 'crisis' => {
-  const weight = cardHeatWeightByType[card.cardType];
-  const localSignal = localHeat * weight.local;
-  const federalSignal = federalHeat * weight.federal;
-
-  if (localSignal >= 72 || federalSignal >= 72) {
+  if (localTier === 'crisis' || federalTier === 'crisis') {
     return 'crisis';
   }
 
-  if (federalSignal >= 38) {
+  if (federalTier !== 'clear') {
     return 'federal';
   }
 
-  if (localSignal >= 24) {
+  if (localTier !== 'clear') {
     return 'local';
   }
 
@@ -166,19 +157,19 @@ const resolveCardHeatLens = (
 };
 
 export const MurderBoard = (): ReactElement => {
-  const [selectedCardId, setSelectedCardId] = useState<string>(PHASE_TWO_BOARD_CARDS[0].id);
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [assignedSlots, setAssignedSlots] = useState<Record<string, ActiveVerbSlotId>>({});
   const [queuedDrop, setQueuedDrop] = useState<VerbSlotDropSignal | null>(null);
-  const [zoom, setZoom] = useState<number>(1);
-  const [minZoom, setMinZoom] = useState<number>(0.72);
+  const [zoom, setZoom] = useState<number>(DEFAULT_ZOOM);
+  const [minZoom, setMinZoom] = useState<number>(DEFAULT_ZOOM);
   const [panX, setPanX] = useState<number>(0);
   const [panY, setPanY] = useState<number>(0);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [cardPositions, setCardPositions] = useState<Record<string, BoardCardPosition>>(() => {
-    return buildInitialCardPositions(PHASE_TWO_BOARD_CARDS);
+    return {};
   });
   const [cardZIndices, setCardZIndices] = useState<Record<string, number>>(() => {
-    return buildInitialCardZIndices(PHASE_TWO_BOARD_CARDS);
+    return {};
   });
 
   const streetWireEntries = useGameStore((state): readonly EventLogEntry[] => {
@@ -193,10 +184,18 @@ export const MurderBoard = (): ReactElement => {
   const jeffriesSnapshot = useGameStore((state): typeof state.jeffries => {
     return state.jeffries;
   });
+  const boardCards = useGameStore((state): FoundationBoardCard[] => {
+    return state.boardCards;
+  });
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const panAnchorRef = useRef<PanAnchor | null>(null);
-  const nextCardLayerRef = useRef<number>(PHASE_TWO_BOARD_CARDS.length + 2);
+  const boardCardsRef = useRef<FoundationBoardCard[]>(boardCards);
+  const nextCardLayerRef = useRef<number>(2);
+
+  useEffect((): void => {
+    boardCardsRef.current = boardCards;
+  }, [boardCards]);
 
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -249,24 +248,73 @@ export const MurderBoard = (): ReactElement => {
     return Math.max(MIN_INTERACTIVE_ZOOM, quantizeZoom(value));
   };
 
-  const activeDragCard = useMemo((): BoardCardModel | null => {
+  const seededCardPositions = useMemo((): Record<string, BoardCardPosition> => {
+    return buildInitialCardPositions(boardCards);
+  }, [boardCards]);
+
+  const resolvedCardPositions = useMemo((): Record<string, BoardCardPosition> => {
+    return boardCards.reduce((positions, card): Record<string, BoardCardPosition> => {
+      return {
+        ...positions,
+        [card.id]: cardPositions[card.id] ?? seededCardPositions[card.id] ?? { x: 120, y: 140 },
+      };
+    }, {} as Record<string, BoardCardPosition>);
+  }, [boardCards, cardPositions, seededCardPositions]);
+
+  const seededCardZIndices = useMemo((): Record<string, number> => {
+    return buildInitialCardZIndices(boardCards);
+  }, [boardCards]);
+
+  const resolvedCardZIndices = useMemo((): Record<string, number> => {
+    return boardCards.reduce((layers, card): Record<string, number> => {
+      return {
+        ...layers,
+        [card.id]: cardZIndices[card.id] ?? seededCardZIndices[card.id] ?? 1,
+      };
+    }, {} as Record<string, number>);
+  }, [boardCards, cardZIndices, seededCardZIndices]);
+
+  const resolvedSelectedCardId = useMemo((): string | null => {
+    if (boardCards.length === 0) {
+      return null;
+    }
+
+    if (selectedCardId !== null && boardCards.some((card) => card.id === selectedCardId)) {
+      return selectedCardId;
+    }
+
+    return boardCards[0].id;
+  }, [boardCards, selectedCardId]);
+
+  const getNextCardLayer = (): number => {
+    const highestLayer = Object.values(resolvedCardZIndices).reduce((highest, layer): number => {
+      return layer > highest ? layer : highest;
+    }, 1);
+
+    const nextLayer = Math.max(nextCardLayerRef.current, highestLayer + 1);
+    nextCardLayerRef.current = nextLayer + 1;
+
+    return nextLayer;
+  };
+
+  const activeDragCard = useMemo((): FoundationBoardCard | null => {
     if (activeCardId === null) {
       return null;
     }
 
-    return PHASE_TWO_BOARD_CARDS.find((card) => card.id === activeCardId) ?? null;
-  }, [activeCardId]);
+    return boardCards.find((card) => card.id === activeCardId) ?? null;
+  }, [activeCardId, boardCards]);
 
   const activeCardTitle = activeDragCard?.title ?? null;
 
   const selectedCardTitle = useMemo((): string => {
-    const selectedCard = PHASE_TWO_BOARD_CARDS.find((card) => card.id === selectedCardId);
+    const selectedCard = boardCards.find((card) => card.id === resolvedSelectedCardId);
     return selectedCard?.title ?? 'No card selected';
-  }, [selectedCardId]);
+  }, [boardCards, resolvedSelectedCardId]);
 
-  const handleVerbSlotComplete = (signal: VerbSlotCompletionSignal): void => {
-    const completedCard = PHASE_TWO_BOARD_CARDS.find((card) => card.id === signal.cardId);
-    const completedSlot = PHASE_TWO_VERB_SLOTS.find((slot) => slot.id === signal.slotId);
+  const handleVerbSlotComplete = useCallback((signal: VerbSlotCompletionSignal): void => {
+    const completedCard = boardCardsRef.current.find((card) => card.id === signal.cardId);
+    const completedSlot = FOUNDATION_VERB_SLOTS.find((slot) => slot.id === signal.slotId);
 
     if (completedCard === undefined || completedSlot === undefined) {
       return;
@@ -284,27 +332,27 @@ export const MurderBoard = (): ReactElement => {
     });
 
     addStreetWireLine(`${signal.cardTitle} finished ${completedSlot.title}. The books are about to move.`, 'info');
-  };
+  }, [addStreetWireLine]);
 
   const handleDragStart = (event: DragStartEvent): void => {
     const cardId = String(event.active.id);
+    const nextLayer = getNextCardLayer();
 
     setActiveCardId(cardId);
     setSelectedCardId(cardId);
     setCardZIndices((current): Record<string, number> => {
       return {
         ...current,
-        [cardId]: nextCardLayerRef.current,
+        [cardId]: nextLayer,
       };
     });
-    nextCardLayerRef.current += 1;
   };
 
   const handleDragEnd = (event: DragEndEvent): void => {
     setActiveCardId(null);
 
     const cardId = String(event.active.id);
-    const movedCard = PHASE_TWO_BOARD_CARDS.find((candidate) => candidate.id === cardId);
+    const movedCard = boardCards.find((candidate) => candidate.id === cardId);
 
     if (movedCard === undefined) {
       return;
@@ -322,7 +370,7 @@ export const MurderBoard = (): ReactElement => {
 
     if (shouldPersistPosition) {
       setCardPositions((current): Record<string, BoardCardPosition> => {
-        const previous = current[cardId];
+        const previous = current[cardId] ?? resolvedCardPositions[cardId];
 
         if (previous === undefined) {
           return current;
@@ -344,7 +392,7 @@ export const MurderBoard = (): ReactElement => {
       return;
     }
 
-    const slot = PHASE_TWO_VERB_SLOTS.find((candidate) => candidate.id === String(overId));
+    const slot = FOUNDATION_VERB_SLOTS.find((candidate) => candidate.id === String(overId));
 
     if (slot === undefined) {
       return;
@@ -445,9 +493,9 @@ export const MurderBoard = (): ReactElement => {
     <main className="murder-board">
       <header className="murder-board__header">
         <div>
-          <p className="murder-board__kicker">Dockside / Phase 2</p>
+          <p className="murder-board__kicker">Dockside / Phase 3</p>
           <h1>The Murder Board</h1>
-          <p>Static cards, live drag targets, timer rings, and a noisy street wire.</p>
+          <p>Live ECS cards, verb timers, and a street wire fed by runtime outcomes.</p>
         </div>
 
         <div className="murder-board__status-panel">
@@ -507,7 +555,7 @@ export const MurderBoard = (): ReactElement => {
             <h2>Verb Slots</h2>
 
             <div className="verb-rack__slots">
-              {PHASE_TWO_VERB_SLOTS.map((slot) => {
+              {FOUNDATION_VERB_SLOTS.map((slot) => {
                 return <VerbSlot key={slot.id} slot={slot} queuedDrop={queuedDrop} onComplete={handleVerbSlotComplete} />;
               })}
             </div>
@@ -529,8 +577,8 @@ export const MurderBoard = (): ReactElement => {
               animate={{ x: panX, y: panY, scale: zoom }}
               transition={{ type: 'tween', duration: 0 }}
             >
-              {PHASE_TWO_BOARD_CARDS.map((card) => {
-                const cardPosition = cardPositions[card.id];
+              {boardCards.map((card) => {
+                const cardPosition = resolvedCardPositions[card.id];
 
                 if (cardPosition === undefined) {
                   return null;
@@ -540,12 +588,12 @@ export const MurderBoard = (): ReactElement => {
                   <Card
                     key={card.id}
                     card={card}
-                    selected={selectedCardId === card.id}
+                    selected={resolvedSelectedCardId === card.id}
                     assignedSlot={assignedSlots[card.id] ?? null}
-                    heatLens={resolveCardHeatLens(card, jeffriesSnapshot.localHeat, jeffriesSnapshot.federalHeat)}
+                    heatLens={resolveCardHeatLens(jeffriesSnapshot.localHeat, jeffriesSnapshot.federalHeat)}
                     position={cardPosition}
                     boardZoom={zoom}
-                    zIndex={cardZIndices[card.id] ?? 1}
+                    zIndex={resolvedCardZIndices[card.id] ?? 1}
                     onSelect={setSelectedCardId}
                   />
                 );

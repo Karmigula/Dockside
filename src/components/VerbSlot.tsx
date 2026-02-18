@@ -39,16 +39,24 @@ const TIMER_RADIUS = 16;
 const TIMER_CIRCUMFERENCE = 2 * Math.PI * TIMER_RADIUS;
 
 export const VerbSlot = ({ slot, queuedDrop, onComplete }: VerbSlotProps): ReactElement => {
+  const lastQueuedDropTokenRef = useRef<number | null>(null);
+
   const machine = useMemo(() => {
     return createVerbSlotMachine({
       slotId: slot.id,
       durationMs: slot.durationMs,
+      onComplete: ({ token, cardId, cardTitle, slotId }): void => {
+        onComplete({
+          token,
+          slotId,
+          cardId,
+          cardTitle,
+        });
+      },
     });
-  }, [slot.durationMs, slot.id]);
+  }, [onComplete, slot.durationMs, slot.id]);
 
   const [state, send] = useMachine(machine, {});
-  const activeDropTokenRef = useRef<number | null>(null);
-  const completedDropTokenRef = useRef<number | null>(null);
 
   const { setNodeRef, isOver } = useDroppable({
     id: slot.id,
@@ -67,41 +75,19 @@ export const VerbSlot = ({ slot, queuedDrop, onComplete }: VerbSlotProps): React
       return;
     }
 
+    if (lastQueuedDropTokenRef.current === queuedDrop.token) {
+      return;
+    }
+
+    lastQueuedDropTokenRef.current = queuedDrop.token;
+
     send({
       type: 'DROP_CARD',
+      token: queuedDrop.token,
       cardId: queuedDrop.cardId,
       cardTitle: queuedDrop.cardTitle,
     });
-
-    activeDropTokenRef.current = queuedDrop.token;
-    completedDropTokenRef.current = null;
   }, [queuedDrop, send, slot.id]);
-
-  useEffect((): void => {
-    if (!state.matches('cooldown')) {
-      return;
-    }
-
-    const activeToken = activeDropTokenRef.current;
-
-    if (
-      activeToken === null ||
-      completedDropTokenRef.current === activeToken ||
-      state.context.queuedCardId === null ||
-      state.context.queuedCardTitle === null
-    ) {
-      return;
-    }
-
-    completedDropTokenRef.current = activeToken;
-
-    onComplete({
-      token: activeToken,
-      slotId: slot.id,
-      cardId: state.context.queuedCardId,
-      cardTitle: state.context.queuedCardTitle,
-    });
-  }, [onComplete, slot.id, state]);
 
   const progress = 1 - state.context.remainingMs / state.context.durationMs;
   const normalizedProgress = Math.max(0, Math.min(1, progress));

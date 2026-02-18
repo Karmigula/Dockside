@@ -2,10 +2,11 @@ import { useDraggable } from '@dnd-kit/core';
 import { motion } from 'framer-motion';
 import { useMemo, useState, type CSSProperties, type ReactElement } from 'react';
 
-import type { ActiveVerbSlotId, BoardCardModel } from '../data/cards/phase2.board';
+import type { ActiveVerbSlotId } from '../data/cards/phase2.board';
+import type { FoundationBoardCard } from '../ecs/world';
 
 type CardProps = {
-  card: BoardCardModel;
+  card: FoundationBoardCard;
   selected: boolean;
   assignedSlot: ActiveVerbSlotId | null;
   heatLens: 'clear' | 'local' | 'federal' | 'crisis';
