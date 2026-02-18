@@ -1,7 +1,7 @@
 import { useDroppable } from '@dnd-kit/core';
 import { useMachine } from '@xstate/react';
 import { motion } from 'framer-motion';
-import { useEffect, useMemo, type ReactElement } from 'react';
+import { useEffect, useMemo, useRef, type ReactElement } from 'react';
 
 import type { ActiveVerbSlotId, VerbSlotModel } from '../data/cards/phase2.board';
 import { createVerbSlotMachine } from '../machines/verbSlot.machine';
@@ -13,9 +13,17 @@ export type VerbSlotDropSignal = {
   cardTitle: string;
 };
 
+export type VerbSlotCompletionSignal = {
+  token: number;
+  slotId: ActiveVerbSlotId;
+  cardId: string;
+  cardTitle: string;
+};
+
 type VerbSlotProps = {
   slot: VerbSlotModel;
   queuedDrop: VerbSlotDropSignal | null;
+  onComplete: (signal: VerbSlotCompletionSignal) => void;
 };
 
 const slotColorClassByAccent: Record<VerbSlotModel['accentToken'], string> = {
@@ -30,7 +38,7 @@ const slotColorClassByAccent: Record<VerbSlotModel['accentToken'], string> = {
 const TIMER_RADIUS = 16;
 const TIMER_CIRCUMFERENCE = 2 * Math.PI * TIMER_RADIUS;
 
-export const VerbSlot = ({ slot, queuedDrop }: VerbSlotProps): ReactElement => {
+export const VerbSlot = ({ slot, queuedDrop, onComplete }: VerbSlotProps): ReactElement => {
   const machine = useMemo(() => {
     return createVerbSlotMachine({
       slotId: slot.id,
@@ -39,6 +47,8 @@ export const VerbSlot = ({ slot, queuedDrop }: VerbSlotProps): ReactElement => {
   }, [slot.durationMs, slot.id]);
 
   const [state, send] = useMachine(machine, {});
+  const activeDropTokenRef = useRef<number | null>(null);
+  const completedDropTokenRef = useRef<number | null>(null);
 
   const { setNodeRef, isOver } = useDroppable({
     id: slot.id,
@@ -62,7 +72,36 @@ export const VerbSlot = ({ slot, queuedDrop }: VerbSlotProps): ReactElement => {
       cardId: queuedDrop.cardId,
       cardTitle: queuedDrop.cardTitle,
     });
+
+    activeDropTokenRef.current = queuedDrop.token;
+    completedDropTokenRef.current = null;
   }, [queuedDrop, send, slot.id]);
+
+  useEffect((): void => {
+    if (!state.matches('cooldown')) {
+      return;
+    }
+
+    const activeToken = activeDropTokenRef.current;
+
+    if (
+      activeToken === null ||
+      completedDropTokenRef.current === activeToken ||
+      state.context.queuedCardId === null ||
+      state.context.queuedCardTitle === null
+    ) {
+      return;
+    }
+
+    completedDropTokenRef.current = activeToken;
+
+    onComplete({
+      token: activeToken,
+      slotId: slot.id,
+      cardId: state.context.queuedCardId,
+      cardTitle: state.context.queuedCardTitle,
+    });
+  }, [onComplete, slot.id, state]);
 
   const progress = 1 - state.context.remainingMs / state.context.durationMs;
   const normalizedProgress = Math.max(0, Math.min(1, progress));

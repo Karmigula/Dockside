@@ -8,6 +8,7 @@ type CardProps = {
   card: BoardCardModel;
   selected: boolean;
   assignedSlot: ActiveVerbSlotId | null;
+  heatLens: 'clear' | 'local' | 'federal' | 'crisis';
   position: {
     x: number;
     y: number;
@@ -24,7 +25,7 @@ const dotMeter = (trustDots: number): string => {
   return `${filled}${empty}`;
 };
 
-export const Card = ({ card, selected, assignedSlot, position, boardZoom, zIndex, onSelect }: CardProps): ReactElement => {
+export const Card = ({ card, selected, assignedSlot, heatLens, position, boardZoom, zIndex, onSelect }: CardProps): ReactElement => {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: card.id,
     data: {
@@ -83,8 +84,8 @@ export const Card = ({ card, selected, assignedSlot, position, boardZoom, zIndex
       {...attributes}
       {...listeners}
       data-card-root="true"
-      className={`board-card board-card--${card.cardType}${isFlipped ? ' board-card--flipped' : ''}${
-        isDragging ? ' board-card--is-dragging' : ''
+      className={`board-card board-card--${card.cardType} board-card--heat-${heatLens} ${isFlipped ? 'board-card--flipped' : ''} ${
+        isDragging ? 'board-card--is-dragging' : ''
       }`}
       style={rootStyle}
       onClick={(): void => {

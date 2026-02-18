@@ -22,7 +22,6 @@ import {
 
 import {
   PHASE_TWO_BOARD_CARDS,
-  PHASE_TWO_EVENT_LOG_SEED,
   PHASE_TWO_VERB_SLOTS,
   type ActiveVerbSlotId,
   type BoardCardCluster,
@@ -30,7 +29,9 @@ import {
 } from '../data/cards/phase2.board';
 import { Card } from './Card';
 import { EventLog, type EventLogEntry } from './EventLog';
-import { VerbSlot, type VerbSlotDropSignal } from './VerbSlot';
+import { VerbSlot, type VerbSlotCompletionSignal, type VerbSlotDropSignal } from './VerbSlot';
+import { useGameStore } from '../store/gameStore';
+import { queueCompletedVerbAction } from '../store/verbStore';
 
 type PanAnchor = {
   pointerId: number;
@@ -50,29 +51,6 @@ const clamp = (value: number, min: number, max: number): number => {
   }
 
   return value;
-};
-
-const toClockStamp = (): string => {
-  const now = new Date();
-
-  return now.toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-};
-
-const buildSeedEvents = (): EventLogEntry[] => {
-  return PHASE_TWO_EVENT_LOG_SEED.map((seed, index): EventLogEntry => {
-    const minute = index + 1;
-
-    return {
-      id: seed.id,
-      tone: seed.tone,
-      line: seed.line,
-      stampedAt: `08:0${minute}`,
-    };
-  });
 };
 
 type BoardCardPosition = {
@@ -144,7 +122,7 @@ const strictSlotCollision: CollisionDetection = (args) => {
   return pointerWithin(args);
 };
 
-const toneForSlot = (slotId: ActiveVerbSlotId): EventLogEntry['tone'] => {
+const toneForSlot = (slotId: ActiveVerbSlotId): 'warning' | 'info' | 'success' => {
   if (slotId === 'violence' || slotId === 'bribe') {
     return 'warning';
   }
@@ -156,13 +134,41 @@ const toneForSlot = (slotId: ActiveVerbSlotId): EventLogEntry['tone'] => {
   return 'success';
 };
 
+const cardHeatWeightByType: Record<BoardCardModel['cardType'], { local: number; federal: number }> = {
+  person: { local: 1, federal: 0.45 },
+  location: { local: 0.7, federal: 0.3 },
+  resource: { local: 0.45, federal: 0.55 },
+  situation: { local: 0.85, federal: 0.8 },
+};
+
+const resolveCardHeatLens = (
+  card: BoardCardModel,
+  localHeat: number,
+  federalHeat: number,
+): 'clear' | 'local' | 'federal' | 'crisis' => {
+  const weight = cardHeatWeightByType[card.cardType];
+  const localSignal = localHeat * weight.local;
+  const federalSignal = federalHeat * weight.federal;
+
+  if (localSignal >= 72 || federalSignal >= 72) {
+    return 'crisis';
+  }
+
+  if (federalSignal >= 38) {
+    return 'federal';
+  }
+
+  if (localSignal >= 24) {
+    return 'local';
+  }
+
+  return 'clear';
+};
+
 export const MurderBoard = (): ReactElement => {
   const [selectedCardId, setSelectedCardId] = useState<string>(PHASE_TWO_BOARD_CARDS[0].id);
   const [assignedSlots, setAssignedSlots] = useState<Record<string, ActiveVerbSlotId>>({});
   const [queuedDrop, setQueuedDrop] = useState<VerbSlotDropSignal | null>(null);
-  const [entries, setEntries] = useState<EventLogEntry[]>(() => {
-    return buildSeedEvents();
-  });
   const [zoom, setZoom] = useState<number>(1);
   const [minZoom, setMinZoom] = useState<number>(0.72);
   const [panX, setPanX] = useState<number>(0);
@@ -173,6 +179,19 @@ export const MurderBoard = (): ReactElement => {
   });
   const [cardZIndices, setCardZIndices] = useState<Record<string, number>>(() => {
     return buildInitialCardZIndices(PHASE_TWO_BOARD_CARDS);
+  });
+
+  const streetWireEntries = useGameStore((state): readonly EventLogEntry[] => {
+    return state.streetWireEntries;
+  });
+  const addStreetWireLine = useGameStore((state): ((line: string, tone: 'info' | 'warning' | 'success') => void) => {
+    return state.addStreetWireLine;
+  });
+  const simulationClock = useGameStore((state): typeof state.time => {
+    return state.time;
+  });
+  const jeffriesSnapshot = useGameStore((state): typeof state.jeffries => {
+    return state.jeffries;
   });
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
@@ -244,6 +263,28 @@ export const MurderBoard = (): ReactElement => {
     const selectedCard = PHASE_TWO_BOARD_CARDS.find((card) => card.id === selectedCardId);
     return selectedCard?.title ?? 'No card selected';
   }, [selectedCardId]);
+
+  const handleVerbSlotComplete = (signal: VerbSlotCompletionSignal): void => {
+    const completedCard = PHASE_TWO_BOARD_CARDS.find((card) => card.id === signal.cardId);
+    const completedSlot = PHASE_TWO_VERB_SLOTS.find((slot) => slot.id === signal.slotId);
+
+    if (completedCard === undefined || completedSlot === undefined) {
+      return;
+    }
+
+    const completedAtMs = Date.now();
+
+    queueCompletedVerbAction({
+      id: `verb-${signal.token}-${completedAtMs}`,
+      slotId: signal.slotId,
+      cardId: signal.cardId,
+      cardTitle: signal.cardTitle,
+      cardType: completedCard.cardType,
+      completedAtMs,
+    });
+
+    addStreetWireLine(`${signal.cardTitle} finished ${completedSlot.title}. The books are about to move.`, 'info');
+  };
 
   const handleDragStart = (event: DragStartEvent): void => {
     const cardId = String(event.active.id);
@@ -338,16 +379,7 @@ export const MurderBoard = (): ReactElement => {
       cardTitle: movedCard.title,
     });
 
-    setEntries((current): EventLogEntry[] => {
-      const nextEntry: EventLogEntry = {
-        id: `drop-${token}`,
-        tone: toneForSlot(slot.id),
-        line: `${movedCard.title} slid into ${slot.title}. The timer ring starts to burn.`,
-        stampedAt: toClockStamp(),
-      };
-
-      return [nextEntry, ...current].slice(0, 10);
-    });
+    addStreetWireLine(`${movedCard.title} slid into ${slot.title}. The timer ring starts to burn.`, toneForSlot(slot.id));
   };
 
   const handleWheel = (event: WheelEvent<HTMLDivElement>): void => {
@@ -423,6 +455,13 @@ export const MurderBoard = (): ReactElement => {
             Selected: <strong>{selectedCardTitle}</strong>
           </p>
           <p>{activeCardTitle === null ? 'Drag a card into a verb slot.' : `Dragging: ${activeCardTitle}`}</p>
+          <p>
+            Time: Shift {simulationClock.shift} / Day {simulationClock.day} / Week {simulationClock.week}
+          </p>
+          <p>
+            Cash ${jeffriesSnapshot.cash} · Heat L {jeffriesSnapshot.localHeat.toFixed(1)} · F{' '}
+            {jeffriesSnapshot.federalHeat.toFixed(1)}
+          </p>
 
           <div className="murder-board__zoom-controls">
             <button
@@ -469,7 +508,7 @@ export const MurderBoard = (): ReactElement => {
 
             <div className="verb-rack__slots">
               {PHASE_TWO_VERB_SLOTS.map((slot) => {
-                return <VerbSlot key={slot.id} slot={slot} queuedDrop={queuedDrop} />;
+                return <VerbSlot key={slot.id} slot={slot} queuedDrop={queuedDrop} onComplete={handleVerbSlotComplete} />;
               })}
             </div>
           </aside>
@@ -503,6 +542,7 @@ export const MurderBoard = (): ReactElement => {
                     card={card}
                     selected={selectedCardId === card.id}
                     assignedSlot={assignedSlots[card.id] ?? null}
+                    heatLens={resolveCardHeatLens(card, jeffriesSnapshot.localHeat, jeffriesSnapshot.federalHeat)}
                     position={cardPosition}
                     boardZoom={zoom}
                     zIndex={cardZIndices[card.id] ?? 1}
@@ -513,7 +553,7 @@ export const MurderBoard = (): ReactElement => {
             </motion.div>
           </section>
 
-          <EventLog entries={entries} />
+          <EventLog entries={streetWireEntries} />
         </div>
       </DndContext>
     </main>

@@ -14,6 +14,7 @@ import { createHeatSystem } from './systems/heat.system';
 import { createIdentitySystem } from './systems/identity.system';
 import { createResourceSystem } from './systems/resource.system';
 import { createTimeSystem } from './systems/time.system';
+import { createVerbSystem, type VerbResolution, type VerbSystemOptions } from './systems/verb.system';
 import type { ResourceType } from './types';
 
 export const FOUNDATION_TICK_RATE_HZ = 60;
@@ -49,12 +50,18 @@ export type DocksideSimulationOptions = {
   autoStart: boolean;
   tickRateHz: number;
   onTick: (snapshot: FoundationSnapshot) => void;
+  dequeueVerbActions: VerbSystemOptions['dequeueVerbActions'];
+  onVerbResolved: (resolution: VerbResolution) => void;
 };
 
 export type DocksideSimulationHandle = {
   runtimeWorld: IRuntimeWorld;
   stop: () => void;
 };
+
+type DocksideWorldSystemOptions = Partial<
+  Pick<DocksideSimulationOptions, 'dequeueVerbActions' | 'onVerbResolved'>
+>;
 
 const REGISTERED_COMPONENTS = [
   EntityIdComponent,
@@ -257,8 +264,12 @@ const registerCoreEntities = (preptimeWorld: IPreptimeWorld): void => {
   }
 };
 
-export const createDocksidePreptimeWorld = (): IPreptimeWorld => {
+export const createDocksidePreptimeWorld = (options: DocksideWorldSystemOptions = {}): IPreptimeWorld => {
   const timeSystem = createTimeSystem();
+  const verbSystem = createVerbSystem({
+    dequeueVerbActions: options.dequeueVerbActions,
+    onResolved: options.onVerbResolved,
+  });
   const resourceSystem = createResourceSystem();
   const heatSystem = createHeatSystem();
   const identitySystem = createIdentitySystem();
@@ -269,6 +280,10 @@ export const createDocksidePreptimeWorld = (): IPreptimeWorld => {
     .withDefaultScheduling((root): void => {
       root.addNewStage((stage): void => {
         stage.addSystem(timeSystem);
+      });
+
+      root.addNewStage((stage): void => {
+        stage.addSystem(verbSystem);
       });
 
       root.addNewStage((stage): void => {
@@ -290,8 +305,10 @@ export const createDocksidePreptimeWorld = (): IPreptimeWorld => {
   return preptimeWorld;
 };
 
-export const createDocksideRuntimeWorld = async (): Promise<IRuntimeWorld> => {
-  const preptimeWorld = createDocksidePreptimeWorld();
+export const createDocksideRuntimeWorld = async (
+  options: DocksideWorldSystemOptions = {},
+): Promise<IRuntimeWorld> => {
+  const preptimeWorld = createDocksidePreptimeWorld(options);
   return preptimeWorld.prepareRun();
 };
 
@@ -369,7 +386,10 @@ export const readFoundationSnapshot = (runtimeWorld: IRuntimeWorld): FoundationS
 export const bootDocksideSimulation = async (
   options: Partial<DocksideSimulationOptions> = {},
 ): Promise<DocksideSimulationHandle> => {
-  const runtimeWorld = await createDocksideRuntimeWorld();
+  const runtimeWorld = await createDocksideRuntimeWorld({
+    dequeueVerbActions: options.dequeueVerbActions,
+    onVerbResolved: options.onVerbResolved,
+  });
   const tickRateHz = options.tickRateHz ?? FOUNDATION_TICK_RATE_HZ;
   const autoStart = options.autoStart ?? true;
 

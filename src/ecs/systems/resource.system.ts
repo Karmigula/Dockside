@@ -24,20 +24,27 @@ const resourceSystemBuilder = createSystem({
 })
   .withName('ResourceSystem')
   .withRunFunction(async ({ timeQuery, assetsQuery, resourcesQuery }): Promise<void> => {
-    const timeData = timeQuery.getFirst();
-    if (timeData === undefined) {
+    let currentTime: TimeComponent | null = null;
+
+    await timeQuery.execute(({ timeComponent }): void => {
+      if (currentTime !== null) {
+        return;
+      }
+
+      currentTime = timeComponent;
+    });
+
+    if (currentTime === null) {
       return;
     }
 
-    const { timeComponent } = timeData;
-
-    if (isShiftBoundary(timeComponent)) {
+    if (isShiftBoundary(currentTime)) {
       await assetsQuery.execute(({ assetComponent }): void => {
         assetComponent.cash += 1;
       });
     }
 
-    if (!isWeekBoundary(timeComponent)) {
+    if (!isWeekBoundary(currentTime)) {
       return;
     }
 

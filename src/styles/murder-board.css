@@ -389,6 +389,45 @@
   opacity: 0.9;
 }
 
+.board-card__face::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.board-card--heat-local .board-card__face {
+  border-color: rgba(160, 72, 32, 0.62);
+}
+
+.board-card--heat-local .board-card__face::after {
+  opacity: 0.2;
+  background: radial-gradient(circle at 85% 20%, rgba(160, 72, 32, 0.28), transparent 55%);
+}
+
+.board-card--heat-federal .board-card__face {
+  border-color: rgba(42, 74, 107, 0.68);
+}
+
+.board-card--heat-federal .board-card__face::after {
+  opacity: 0.2;
+  background: radial-gradient(circle at 15% 15%, rgba(42, 74, 107, 0.32), transparent 58%);
+}
+
+.board-card--heat-crisis .board-card__face {
+  border-color: rgba(180, 42, 32, 0.78);
+}
+
+.board-card--heat-crisis .board-card__face::after {
+  opacity: 0.34;
+  background:
+    radial-gradient(circle at 15% 15%, rgba(180, 42, 32, 0.35), transparent 48%),
+    radial-gradient(circle at 85% 80%, rgba(128, 26, 20, 0.3), transparent 50%);
+}
+
 .board-card__face--back {
   justify-content: flex-start;
   gap: 0.34rem;
