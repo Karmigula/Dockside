@@ -1,0 +1,768 @@
+# Windsurf Prompt: _Dockside_ — The Jeffries Syndicate
+
+### A Deep-Simulation Criminal Network Builder
+
+> Paste everything below this line into Windsurf as your initial project prompt. Before beginning, configure `.windsurfrules` as specified in Section 6 and read Section 7 on Windsurf workflow.
+
+---
+
+## 0. Vision Statement
+
+Build a browser-based card game called **Dockside** set in Detroit, 1986. The player is **Bartholomeu Helio Jeffries** — a bilingual dock worker with a Capoeira background, standing on the edge of the city's criminal underworld. The game synthesizes:
+
+- **Dwarf Fortress / Warsim** depth: an invisible simulation of 100+ autonomous NPCs, a living social graph, emergent faction politics, and economic systems that run whether the player acts or not.
+- **Cultist Simulator** interface: a card tableau where every person, resource, and opportunity is a physical-feeling card; abstract verb slots that combine cards to produce outcomes; no tutorials, no hand-holding.
+- **Detroit-specific noir**: the Rust Belt collapse, dock labor politics, Brazilian-American cultural identity, and 1980s criminal enterprise as the living setting — not a backdrop.
+
+The core loop is **building a criminal network from zero** — starting as a dock hand with two weeks of breathing room and zero underworld contact, growing through careful management of people, resources, and opportunities into a figure of real power.
+
+---
+
+## 1. Tech Stack
+
+|Component|Technology|Rationale|
+|---|---|---|
+|Language|**TypeScript**|Type safety is non-negotiable for a complex ECS simulation; prevents regression; improves Cascade's code generation quality|
+|Simulation Core|**sim-ecs**|TypeScript-native ECS library optimized for simulation (not rendering); strict type-hinting for Components and Systems|
+|Frontend|**React 18 + Vite**|Component model maps directly to Card/Verb metaphor; instant HMR for rapid iteration|
+|State Bridge|**Zustand**|Lightweight store to sync high-frequency ECS simulation ticks to the React UI|
+|Game Loop Logic|**XState**|Visualizable state machines for verb slot interactions, timer management, and prerequisite gating|
+|Animations|**Framer Motion**|Physics-based "juice" for card drag-and-drop — cards must feel like physical objects with weight and resistance|
+|Drag-and-Drop|**dnd-kit**|Best-in-class React drag library; handles card-to-verb-slot interactions|
+|Testing|**Vitest**|Fast unit testing for simulation logic and procedural generation determinism|
+|Fonts|Google Fonts|`IM Fell English` (serif, worn), `Courier Prime` (mono, ledger), `Playfair Display` (display)|
+
+**Scaffold command:**
+
+```bash
+npm create vite@latest dockside -- --template react-ts
+cd dockside
+npm install sim-ecs zustand xstate @xstate/react framer-motion @dnd-kit/core @dnd-kit/sortable vitest
+```
+
+---
+
+## 2. Architecture: The ECS Simulation Layer
+
+This is not a scripted game. Emergent behavior must arise from the interaction of autonomous systems. Traditional OOP inheritance collapses under this load — a "Corrupt Police Chief" is neither simply "Police" nor simply "Criminal." Therefore **Entity-Component-System (ECS)** is not a stylistic preference; it is a structural requirement.
+
+### 2.1 ECS Fundamentals
+
+- **Entities**: Unique integer IDs representing every distinct object — Bartholomeu, a dockside shipment, an NPC lieutenant, a location, an event.
+- **Components**: Pure data containers. **No methods.** No logic. Just typed fields.
+- **Systems**: Stateless logic processors that query entities by component signature and update world state each tick.
+
+### 2.2 Core Components
+
+```typescript
+// Identity
+IdentityComponent    { name: string; description: string; cardType: CardType }
+
+// Resources
+AssetComponent       { cash: number; launderedStatus: boolean }
+ResourceComponent    { type: ResourceType; amount: number; decayRate: number }
+
+// Social / Network
+NetworkComponent     { connections: Edge[]; loyaltyScore: number }
+PsychologyComponent  { fear: number; ambition: number; loyalty: number; addiction?: string }
+ReputationComponent  { fear: number; respect: number }   // Two-axis — see Section 4.1
+
+// World
+TurfComponent        { districtId: string; controlLevel: number }
+LocationComponent    { districtId: string; unlocked: boolean; activeSchemes: EntityId[] }
+
+// Game State
+HeatComponent        { localHeat: number; federalHeat: number }  // Two separate heat tracks
+CardStateComponent   { state: CardState; decayTimer?: number; verbSlot?: VerbSlotId }
+
+// Visual (bridges ECS → React)
+VisualComponent      { cardFace: string; revealed: boolean; dossierData: DossierFields }
+```
+
+### 2.3 Core Systems
+
+```
+TimeSystem           → Advances global clock; fires shift/week/season events
+ResourceSystem       → Applies decay rates; generates passive income from controlled assets
+EconomySystem        → Updates illicit goods prices based on supply (dock success) and demand
+SocialSystem         → Processes relationship graph; propagates opinion changes; detects betrayal
+FactionSystem        → Runs NPC faction AI (aggression, negotiation, expansion)
+HeatSystem           → Accumulates/decays Heat; triggers threshold consequences
+VerbSystem           → Resolves queued card+verb combinations; dispatches outcome events
+CapoeiraSystem       → Processes Ginga Points; unlocks situational options for Bartholomeu
+ProcGenSystem        → Generates factions, NPCs, and situations procedurally each playthrough
+```
+
+### 2.4 The Social Graph: Ripple Effects
+
+Every NPC is a node. Every relationship is a directed edge with a type and a weight (−100 to +100).
+
+**Edge types**: `Family | Business | Debt | Secret | Vendetta | Informant`
+
+When a `ViolenceEvent` fires, `SocialSystem` traverses the graph:
+
+```
+Direct: Target NPC removed from graph
+First-order: Target's Business connections lose income → gain Vendetta against Jeffries
+Second-order: Target's Informant connection loses income source → 
+              may approach Jeffries (Intel opportunity) OR go to police (Heat +15)
+Third-order: Target's Family connections' PsychologyComponent.fear increases;
+             their ReputationComponent assessment of Jeffries shifts
+```
+
+This is what creates emergent storytelling. The player isn't fighting "Gang A" — they're dismantling a web of human connections whose ripples they cannot fully predict.
+
+---
+
+## 3. File Structure
+
+```
+src/
+  ecs/
+    world.ts                  # sim-ecs World builder and tick loop
+    components/
+      identity.ts
+      assets.ts
+      social.ts
+      psychology.ts
+      location.ts
+      heat.ts
+      card-state.ts
+      visual.ts
+    systems/
+      time.system.ts
+      resource.system.ts
+      economy.system.ts
+      social.system.ts
+      faction.system.ts
+      heat.system.ts
+      verb.system.ts
+      capoeira.system.ts
+      procgen.system.ts
+    systems/__tests__/        # Every System gets a .test.ts file
+  
+  store/
+    gameStore.ts              # Zustand: bridges ECS world → React
+    verbStore.ts              # Queued verb actions pending resolution
+  
+  machines/
+    verbSlot.machine.ts       # XState: verb slot timer/prerequisite logic
+    gameLoop.machine.ts       # XState: shift/week progression state machine
+    heat.machine.ts           # XState: heat threshold transitions
+  
+  components/
+    MurderBoard.tsx           # Main canvas — the conspiracy desk
+    Card.tsx                  # Individual draggable card
+    VerbSlot.tsx              # Action slots with XState timers
+    Dossier.tsx               # Deep-data modal for selected card
+    NetworkWeb.tsx            # SVG social graph visualization
+    StatusBar.tsx             # Top bar: time, heat tracks, key resources
+    EventLog.tsx              # Bottom scroll: terse noir narrative feed
+    ShiftButton.tsx           # "End Shift" with Framer Motion press state
+    BoardLens.tsx             # Toggle overlays: Economic / Social / Heat lenses
+  
+  data/
+    cards/
+      people.ts               # NPC card definitions
+      situations.ts           # Opportunity/threat card definitions
+      resources.ts            # Resource card definitions
+      locations.ts            # Location card definitions
+    factions.ts               # Procedural faction building blocks
+    events.ts                 # Event table with state-conditional triggers
+    contraband.ts             # 1980s goods: values, risk, type
+    bartholomeu.ts            # Starting character state (canonical)
+  
+  styles/
+    global.css
+    murder-board.css
+    card.css
+    dossier.css
+    ui.css
+    animations.css
+  
+  App.tsx
+  main.tsx
+
+.windsurfrules                # AI architectural contract (see Section 6)
+.windsurf/skills/             # Custom Windsurf skills (see Section 7)
+```
+
+---
+
+## 4. Game Systems
+
+### 4.1 The Reputation Economy: Two Axes
+
+Reputation is **not a single scale**. It is a two-axis system reflecting the dual currencies of organized crime.
+
+**FEAR** (The Stick)
+
+- _Generated by_: Public violence, assassinations, making examples of debtors, arson
+- _Benefits_: Rivals slower to encroach; coercion success rate increases; intimidation options unlock
+- _Costs_: High local Heat generation; civilians flee controlled turf (passive income drops); police task forces trigger faster
+- _Decay_: Decays quickly — "you are only as scary as your last act"
+
+**RESPECT** (The Carrot)
+
+- _Generated by_: Bribing officials, protecting neighborhoods, honoring debts, union activities, showing loyalty
+- _Benefits_: High passive income (community support); Heat decays faster (community doesn't talk); recruitment is easier; political contacts become accessible
+- _Costs_: High Respect / Low Fear can read as weakness — aggressive factions may encroach
+- _Decay_: Decays slowly, but a single betrayal can shatter it instantly
+
+**Gameplay implication**: A "Psychotic" run (high Fear, low Respect) plays fast and bloody — a glass cannon that generates extreme Heat. A "Godfather" run (high Respect, moderate Fear) is slow, political, and stable but vulnerable to disruption. The interesting zone is managing both simultaneously.
+
+### 4.2 Resources
+
+Resource cards sit on the Murder Board and are consumed by verb actions. They stack (count badge). Some decay weekly.
+
+|Card|Color|Description|Decays?|
+|---|---|---|---|
+|**Cash**|Tobacco gold|Spendable money. Baseline from dock work.|No|
+|**Muscle**|Dark red|Physical leverage — enforcement, protection|Yes (men need paying)|
+|**Intel**|Slate blue|Rumors, surveillance, knowledge of operations|Yes (goes stale)|
+|**Favors**|Muted green|Social currency — owed debts, loyalty, goodwill|Yes (relationships cool)|
+|**Evidence**|Dirty white|Gathered by Detectives against Jeffries. Dangerous.|No (case builds)|
+|**Clean Cash**|Pale gold|Laundered money. Required for legitimate covers.|No|
+|**Ginga Points**|Warm amber|Bartholomeu's Capoeira resource — see Section 4.5|Slowly|
+
+### 4.3 Verb Slots (Action System)
+
+Six permanent verb slots on the left panel. Cards are dragged onto slots to queue actions. Each slot runs on an **XState machine** that enforces cooldowns, prerequisites, and outcome branching.
+
+|Slot|Card Requirements|Function|Unlocks At|
+|---|---|---|---|
+|**Work**|Location card|Earn Cash from legitimate labor. Safe. Slow.|Start|
+|**Scheme**|Situation + Resource|Pursue criminal opportunities. Risk-weighted.|Start|
+|**Train**|Time card|Improve Capoeira rating; generate Ginga Points|Start|
+|**Recruit**|Person + Favors + Intel|Attempt to bring an NPC into your network|Rep 5|
+|**Bribe**|Person + Cash|Reduce Heat, gain access, neutralize threats|Rep 3|
+|**Violence**|Person + Muscle|Targeted intimidation or elimination. Extreme Heat.|Rep 8|
+|**Lay Low**|(empty — no card)|Do nothing. Passively reduces Heat.|Start|
+
+Some slots accept **two cards simultaneously** (mirroring Cultist Simulator's recipe mechanic). The `VerbSystem` validates combinations and routes to the appropriate outcome branch.
+
+### 4.4 The Heat System: Two Tracks
+
+Heat operates on two separate tracks that interact but scale independently.
+
+**Local Heat** (Detroit PD)
+
+|Level|Threshold|Effect|
+|---|---|---|
+|Clear|0–20|No attention|
+|Noticed|21–40|Beat cops circling. Bribe slot unlocks Police target.|
+|Investigated|41–60|A Detective NPC card appears. They accumulate Evidence. If Evidence fills the Case tracker → warrants issued.|
+|Pressured|61–80|SWAT raids on controlled assets. Person cards' Trust drops.|
+|Crisis|81–100|**Event fires** — arrest risk, raid, witness exposure. Capoeira may open escape route.|
+
+**Federal Heat** (FBI / DOJ) — separate track, harder to reduce
+
+- Generated by: dock pilferage, union corruption, interstate smuggling, crossing state lines
+- Cannot be bribed (federal agents); requires scapegoating, evidence destruction, or legal maneuver cards
+- At Federal Heat 60+: A "Federal Investigation" situation card appears with a ticking decay timer
+
+**Heat Management Methods**:
+
+- Lay Low (passive decay, slow)
+- Bribe (fast local reduction; requires Cash + access to right Person)
+- Scapegoat (sacrifice a network member; large reduction; relationship cost)
+- Intimidate Witness (destroys Evidence cards; extreme Risk; Violence slot)
+- Clean Cash generation (improves "legitimate businessman" cover; slow federal heat decay)
+
+### 4.5 The Capoeira System
+
+Capoeira is Bartholomeu's unique identity mechanic — it does not exist in a vacuum but surfaces as a **hidden multiplier and unlock system** threaded through other mechanics.
+
+**Training generates Ginga Points**, which function as a special one-shot resource. Ginga Points can be spent on ephemeral Capoeira cards that appear in specific situations:
+
+|Capoeira Card|Cost|Effect|Appears When|
+|---|---|---|---|
+|_The Angola Game_|2 GP|A deception — make a scheme appear as something else; opponents misread your move|Active Scheme in progress|
+|_Improvised Disarm_|1 GP|In a confrontation: neutralize Violence without generating Fear or Heat|Violence event against Jeffries|
+|_Vanish in the Crowd_|3 GP|Escape a Heat consequence entirely; no arrest, no evidence|Crisis-level Heat event|
+|_Ginga Footwork_|1 GP|Reduce injury to a network contact during a raid|SWAT threshold|
+|_Mestre Vicente's Lesson_|4 GP|Resolve a rival standoff through demonstration rather than violence — generates Respect without Fear|Rival meeting event|
+
+**Capoeira Rating** (1–10, starts at 3) also acts as a passive modifier:
+
+- Rating 1–3: Standard options available
+- Rating 4–6: Unique dialogue options in Talk/Recruit verbs (NPC notices something different about Jeffries)
+- Rating 7–9: Confrontation events offer escape/redirect branches unavailable to others
+- Rating 10: _Mestre Vicente's Teaching_ — a permanent passive that converts 50% of Fear generated into Respect (Bartholomeu's violence is witnessed as control, not savagery)
+
+**Capoeira also surfaces narratively**: high-rating descriptions in the Event Log shift register — from "you dealt with the threat" to "you moved before he finished reaching for his jacket."
+
+### 4.6 The Dossier System (Complexity on Demand)
+
+With a simulation running 100+ NPCs, the board cannot show everything. The **Dossier** solves this.
+
+Every Person card face shows only: name, role, trust meter (dots), and 1–2 revealed traits.
+
+Clicking a Person card opens a **Dossier modal** exposing the full ECS data:
+
+```
+┌─────────────────────────────────────────┐
+│  DOSSIER: RAY KOWALSKI                  │
+│  Role: Dock Foreman, Local 299          │
+│  ──────────────────────────────────     │
+│  Trust: ●●●○○  |  Fear of Jeffries: ●○○ │
+│  Loyalty (general): 4/10               │
+│  Known traits: Greedy, Cautious         │
+│  Revealed traits: [In Debt — $8,400]    │
+│  Hidden traits: [Informant] ??? (req. Trust 4+) │
+│  ──────────────────────────────────     │
+│  Relationships visible to Jeffries:     │
+│    → Brother: Det. Frank Kowalski (PD)  │
+│    → Owes: Sal Marchetti (Bookie)       │
+│  ──────────────────────────────────     │
+│  Current state: Contacted (not Trusted) │
+│  Weekly Need: None active               │
+└─────────────────────────────────────────┘
+```
+
+Hidden traits are revealed through relationship depth, Intel cards, or specific Scheme outcomes. This creates the feeling of truly knowing someone — information as power.
+
+### 4.7 Faction Generation (Warsim-Style Procedural)
+
+Each playthrough generates 4–6 criminal factions from combinatorial variables:
+
+**Organizational Ethos** (defines behavior AI):
+
+- `Corporate` — hierarchical, risk-averse, seeks negotiation
+- `Tribal` — identity/territory driven, highly aggressive on encroachment
+- `Ideological` — motivated by cause (union radicalism, racial power, political); low bribery susceptibility, high loyalty
+
+**Economic Focus** (defines primary racket):
+
+- `Smuggling` — dock-adjacent; direct competition with Jeffries's natural territory
+- `Vice` — narcotics, gambling, prostitution; high income, high Heat
+- `Racketeering` — unions, construction, waste; slow income, political entanglement
+
+**Procedural Quirks** (1–2 per faction, create narrative hooks):
+
+- `Teetotalers` — refuses narcotics/alcohol; market gap Jeffries can exploit
+- `Code of Silence` — extremely hard to turn members into informants
+- `Legitimate Front` — operates a real business; Federal Heat attacks them differently
+- `Old Guard` — resistant to Jeffries's recruitment; respect only earned through demonstrated power
+- `Fractured Leadership` — internal power struggle; can be accelerated or exploited
+
+**Example generated faction**: _The Iron Stevedores_ — Corporate / Smuggling / Teetotalers. They control three dock berths and refuse to touch narcotics. They'd prefer to ignore Jeffries. But if his operations threaten dock access, they will act decisively and without warning.
+
+### 4.8 Location Cards
+
+Locations are semi-permanent cards that generate Situation cards and enable specific actions.
+
+|Location|Unlocked|Generates|Passive Effect|
+|---|---|---|---|
+|**The Docks**|Start|Work shifts, Shipment situations, Pilferage schemes|+1 Cash/week from regular labor|
+|**Southwest Detroit (Home)**|Start|Neighborhood Person cards|−5 Local Heat/week (community cover)|
+|**The Abandoned Warehouse**|Start|Train opportunities|Ginga Points regenerate here faster|
+|**Sal's Bar**|Rep 3|Recruit and Intel situations, Vice contacts|Social hub — new Person cards appear weekly|
+|**The River District**|Rep 10|High-risk Schemes, Federal-adjacent situations|+2 Federal Heat/week passively while active|
+|**Union Hall, Local 299**|Rep 15 / Respect 20|Union Racket schemes, political Person cards|Strike weapon unlocked vs. rival businesses|
+|**The Precinct Contacts**|Specific NPC|Bribe targets, Evidence monitoring|Detective NPC loyalty visible|
+
+### 4.9 Situation Cards (Opportunity / Threat)
+
+Situation cards appear on the board with visible **decay timers** (CSS animation — a border that burns down). Unacted situations vanish. Examples:
+
+_"Shipment Looking the Other Way"_ — A container arriving Thursday. No questions asked, if someone vouches for you. Requires: Trust 3 with a dock contact. Reward: Contraband resource + Cash.
+
+_"Strike Talk on the Floor"_ — Labor unrest is building at Bay 7. Chaos is an opening. Verbs: Scheme (exploit), Talk (stoke), Lay Low (let it pass). Each has different network and Heat consequences.
+
+_"Ray's in Debt"_ — The foreman owes $8,400 to Sal's people. A pressure point with a ticking clock (Sal will collect first). Verbs: Approach (buy the debt), Scheme (use it as leverage), Ignore.
+
+_"Unmarked Van, Lot C"_ — Something is moving. You could watch it, take it, or report it. Each choice affects your relationship with whichever faction owns it — but you don't know who that is yet.
+
+### 4.10 Win States & Loss Conditions
+
+**Loss**:
+
+- Crisis-level Heat event with bad resolution roll → arrest (incarceration game over)
+- Key network contact betrayal while Heat is high and Muscle is zero
+- Cash hits 0 for three consecutive weeks (dock fires you; legitimate cover collapses)
+
+**Win States** (escalating — the game doesn't "end," it transforms):
+
+- **Fear/Respect 10**: "A Name on the Docks" — NPCs begin approaching Jeffries
+- **Rep 25**: "The Waterfront Is Yours" — control a full smuggling lane; dock faction deference
+- **Rep 50**: "Someone in the Room" — political and criminal power intersect; city-level influence
+- **Rep 100**: End State — _Bartholomeu Helio Jeffries. They say the name quietly now._
+
+---
+
+## 5. Visual Design
+
+### 5.1 The Murder Board Metaphor
+
+The game's main play area is not a "tableau" — it is a **Conspirator's Desk / Detective's Murder Board**. The aesthetic is investigation and control: a dark cork surface, corkboard texture in corners, cards like typewritten index cards and polaroids, red string connections rendered as SVG lines between networked Person cards.
+
+This reframes the player's psychological relationship with the UI — they are not a gamer managing resources, they are a criminal architect surveying their operation.
+
+### 5.2 Color Palette
+
+```css
+--bg-primary:      #0a0a08;   /* near-black with warm undertone */
+--bg-surface:      #111109;   /* card table surface */
+--bg-card:         #1a1810;   /* individual card background */
+--bg-cork:         #2a2018;   /* corkboard sections */
+
+--accent-gold:     #b8963e;   /* Cash, highlights, selected state */
+--accent-red:      #8b2020;   /* Muscle, Violence, Heat indicators */
+--accent-blue:     #2a4a6b;   /* Intel, investigation */
+--accent-green:    #2a4a30;   /* Favors, Respect track */
+--accent-amber:    #c4852a;   /* Ginga Points, Capoeira */
+--accent-orange:   #a04820;   /* Heat warning states */
+
+--text-primary:    #d4c8a8;   /* aged paper white */
+--text-secondary:  #8a7a5a;   /* faded, secondary info */
+--text-accent:     #e8d48a;   /* highlighted text */
+
+--string-red:      #8b2020;   /* SVG connection lines in Network Lens */
+--string-gold:     #b8963e;   /* high-trust connections */
+```
+
+### 5.3 Typography
+
+```css
+/* Card titles, dossier headers */
+font-family: 'IM Fell English', serif;
+
+/* Game UI labels, counters, stat numbers */
+font-family: 'Courier Prime', monospace;
+
+/* Section headers, location names */  
+font-family: 'Playfair Display', serif;
+
+/* Event log narrative text */
+font-family: 'IM Fell English', serif;
+font-style: italic;
+```
+
+### 5.4 Card Visual Spec
+
+Cards: `160px × 240px` (CSS-scalable). This is the physical unit of the game.
+
+```
+┌─────────────────────────┐
+│ [TYPE BADGE]  [TIMER ◌] │  ← type pill (left), decay ring (right, only on Situations)
+│                         │
+│    CARD TITLE           │  ← 'IM Fell English', 18px, centered
+│    Role / Subtitle      │  ← 11px, secondary color
+│                         │
+│  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  │
+│                         │
+│  Flavor text in two     │  ← 10px italic, 2-3 lines max
+│  or three stark lines.  │
+│                         │
+│  ─────────────────────  │
+│  Trust: ●●●○○           │  ← dot meters, Courier Prime 9px
+│  State: Contacted       │
+│                         │
+│  [ OPEN DOSSIER ]       │  ← only visible when card is selected
+└─────────────────────────┘
+```
+
+**Card state visual cues**:
+
+- **Decaying**: Vignette darkens from edges inward; intensifies as expiry nears
+- **In Verb Slot**: Animated pulsing border in that slot's accent color (Framer Motion `animate`)
+- **Revealed hidden trait**: Brief golden glow flash on reveal (Framer Motion `keyframes`)
+- **Burned / Lost**: Red wash, crumple animation, card removed from board
+
+### 5.5 Board Lenses
+
+Toggle overlays that highlight relevant card clusters and dim others:
+
+- **Economic Lens**: Highlights resource cards and their flows; shows income/expense lines
+- **Social Lens**: Renders SVG "red string" connections between Person cards based on graph edges; connection weight shown by string thickness
+- **Heat Lens**: Color-codes all cards by their Heat contribution or vulnerability; overlays a district heat map
+
+### 5.6 Animation Principles (Framer Motion)
+
+- Cards dragged toward a compatible Verb Slot: subtle **pull effect**, slot glows
+- Incompatible drop: **bounce rejection** with brief red flash
+- Shift resolution: cards **pulse** then outcome cards **slide** onto the board
+- New card appearance: **fade-in with slight upward drift** from board surface
+- Event log entries: **staggered slide-in** from left, oldest lines fade
+
+---
+
+## 6. Bartholomeu's Starting State
+
+```typescript
+// src/data/bartholomeu.ts
+export const BARTHOLOMEU_START = {
+  name: "Bartholomeu Helio Jeffries",
+  year: 1986,
+  city: "Detroit, MI",
+  neighborhood: "Southwest Detroit",
+
+  stats: {
+    capoeira:  3,   // out of 10 — years of training, not yet mastery
+    strength:  4,   // dock labor has built real power
+    cunning:   3,   // smart, but untested in this world
+    charm:     2,   // reserved by nature; warm only with the trusted
+    loyalty:   5,   // his defining trait — slow to give, impossible to take back
+  },
+
+  reputation: {
+    fear:      0,
+    respect:   0,
+  },
+
+  resources: {
+    cash:      2,   // two weeks of breathing room
+    muscle:    0,
+    intel:     0,
+    favors:    1,   // the cousin who got him the dock job
+    heat:      { local: 0, federal: 0 },
+    ginjaPoints: 0,
+  },
+
+  locationsUnlocked: [
+    'the_docks',
+    'southwest_detroit',
+    'abandoned_warehouse',
+    // 'sals_bar'       → unlocked at Rep 3
+    // 'river_district' → unlocked at Rep 10
+    // 'union_hall'     → unlocked at Rep 15
+  ],
+
+  network: [],  // No criminal contacts. This is the entire game.
+
+  traits: [
+    'LIMINAL',        // Between worlds. Bonus to observing hidden card traits.
+    'CAPOEIRISTA',    // Unlocks Capoeira verb system and Ginga Point generation
+    'BILINGUAL',      // Portuguese opens specific Brazilian-connected Person cards
+    'DOCK_WORKER',    // Work slot generates +1 Cash baseline without location modifier
+    'MOTHERS_SON',    // Sends money home monthly — passive Cash drain; but generates Respect in certain communities
+  ],
+
+  characterNotes: [
+    "Atlanta-born, Rio-blooded. Your mother calls every Sunday.",
+    "You practice in the warehouse when the night shift ends.",
+    "You know how things disappear at the docks. You've looked away.",
+    "You are not looking for this. But it may find you anyway.",
+  ],
+};
+```
+
+---
+
+## 7. Narrative Tone
+
+All in-game text — Event Log, card flavor, Dossier entries, event vignettes — adheres to this voice:
+
+- **Economical**: No sentence longer than necessary. Hemingway, not Dickens.
+- **Morally neutral**: The game does not lecture. It witnesses. Choices have consequences, not judgments.
+- **Period-accurate**: 1986 Detroit. Reagan-era. The automotive collapse is ambient. Cold War paranoia is background noise.
+- **Culturally specific**: Bartholomeu's Brazilian heritage surfaces in moments — a Portuguese word in his inner monologue, the philosophical frame of Capoeira, the memory of Mestre Vicente's lessons about reading your opponent before they move.
+
+**Event structure** (Mad Libs template driving procedural generation):
+
+```
+[Actor] [Action] [at Location] with [Consequence].
+"The Iron Stevedores sent a message. Three of your pallets are missing from Bay 4.
+ Sal says it wasn't him. You have until Friday."
+```
+
+**Tone examples from the Event Log**:
+
+> _Tuesday. Loading Bay 4. A shipping manifest with two different weights, both in ink. The man who hands it to you doesn't meet your eyes. Neither do you. You file it. Or you don't._
+
+> _Ray was at Sal's last night. You weren't there, but Jimmy was. He says Ray drank too much and said something about a cousin who works for the Feds. Jimmy thought you'd want to know._
+
+> _You practiced until 2 AM in the cold warehouse. The movements came clean tonight. Mestre Vicente always said you would understand the ginga when you stopped thinking about it._
+
+---
+
+## 8. Windsurf Workflow
+
+### 8.1 `.windsurfrules` (Project Root)
+
+Create this file before writing any code:
+
+```
+## Architectural Rules
+
+- Pattern: Strict Entity-Component-System (ECS) via sim-ecs.
+- Entities are integer IDs only. No methods on entities.
+- Components are pure data classes. NO methods. NO logic.
+- Systems contain ALL logic. Systems must be stateless.
+- Never mutate ECS state directly from React components.
+  All mutations go through Zustand dispatch → VerbSystem.
+
+## Language Rules
+
+- TypeScript strict mode. All functions have explicit return types.
+- Discriminated unions for game states and card states.
+- Const assertions for all static game data.
+- Prefer types over interfaces for consistency.
+
+## Naming Conventions
+
+- 1980s Detroit register for domain variables where appropriate
+  (e.g., `shakedown` not `collectTax`, `muscle` not `enforcers`)
+- ECS Components: suffix `Component` (e.g., `HeatComponent`)
+- ECS Systems: suffix `System` (e.g., `SocialSystem`)
+- React card components: suffix `Card` (e.g., `PersonCard`)
+- Machines: suffix `.machine.ts` (e.g., `verbSlot.machine.ts`)
+
+## Narrative Rules
+
+- Flavor text tone: noir, economical, morally neutral, 1986-accurate.
+- Never use generic RPG language ("The enemy attacks!").
+  Write like a crime novelist, not a game narrator.
+- Bartholomeu is always "he" or "Jeffries" in system text, never "the player."
+
+## Testing Rules
+
+- Every new System requires a corresponding `.test.ts` in systems/__tests__/
+- Test procedural generation with seeded randomness for determinism.
+- Validate social graph traversal logic explicitly.
+
+## Style Rules
+
+- No Tailwind. Plain CSS with CSS variables only.
+- No inline styles in JSX except Framer Motion animation props.
+- Card dimensions are CSS variables: --card-width: 160px; --card-height: 240px;
+```
+
+### 8.2 Custom Skills (`.windsurf/skills/`)
+
+Create these skill folders before Phase 1:
+
+**`ecs-architecture/SKILL.md`**
+
+> Enforces sim-ecs patterns. Contains component templates, system boilerplate, and anti-patterns to avoid (methods on components, direct React→ECS mutation).
+
+**`procedural-generation/SKILL.md`**
+
+> Guides Cascade through Warsim-style prefix/suffix generation. Contains faction variable tables, 1980s Detroit reference data (names, slang, addresses), JSON fixture templates for NPCs and contraband.
+
+**`social-graph/SKILL.md`**
+
+> Manages relationship network implementation. Includes graph traversal algorithms, ripple effect logic templates, and visualization debugging patterns.
+
+**`noir-narrative/SKILL.md`**
+
+> Ensures generated text matches tone. Contains example event text, vocabulary guide (period-accurate 1980s Detroit), and anti-patterns (generic RPG language, moralizing).
+
+### 8.3 Cascade Prompt Strategies
+
+**For simulation logic** — break into atomic steps, never ask for a whole feature:
+
+```
+Context: "I am implementing the Heat system. HeatComponent is defined."
+Step 1: "Create HeatSystem.ts that iterates entities with HeatComponent.
+         If localHeat crosses threshold 41, spawn a Detective NPC entity
+         with IdentityComponent and a Case tracker component. Use sim-ecs query syntax."
+Step 2: "The Detective entity needs a CaseSystem that accumulates Evidence
+         cards each week until a warrant threshold (3 Evidence) is reached."
+Step 3: "When warrant issued, dispatch a WarrantEvent that XState heat.machine.ts
+         can intercept to transition to 'Pressured' state."
+```
+
+**For large JSON datasets** (Phase 4):
+
+```
+"Generate 50 unique Detroit-appropriate NPC names with associated PsychologyComponent
+defaults (fear, ambition, loyalty values 1-10), a role, and one 'Quirk' trait string
+in 1980s noir register. Output as TypeScript const array."
+```
+
+**For performance review** (Phase 5):
+
+```
+"Analyze SocialSystem.ts. Where are the bottlenecks if I run this with 500 nodes
+and 2000 edges? Suggest query optimizations using sim-ecs's archetype system."
+```
+
+---
+
+## 9. Development Roadmap
+
+### Phase 1 — The Foundation (Weeks 1–4)
+
+**Goal**: Functioning ECS simulation running in the console with unit tests passing.
+
+- Initialize Vite + React + TypeScript. Configure `.windsurfrules`. Create skill folders.
+- Install and configure `sim-ecs`. Build World instance.
+- Implement `TimeSystem`, `ResourceSystem` (Cash), `IdentitySystem`.
+- Define all Component schemas (typed; no methods).
+- Write 10 unit tests: resources accumulate correctly over time ticks.
+- _Windsurf focus_: Use Cascade to generate component/system boilerplate with type safety from day one.
+
+### Phase 2 — The Murder Board (Weeks 5–8)
+
+**Goal**: Tactile UI that looks and feels right. No simulation yet — cards are static.
+
+- Build `MurderBoard.tsx` with pan/zoom canvas.
+- Build `Card.tsx` with full visual spec — Framer Motion flip, glow states, decay animation.
+- Build all six `VerbSlot.tsx` components with XState timer rings.
+- Implement `dnd-kit` drag-and-drop. Drops log to console only.
+- Implement `EventLog.tsx` with staggered Framer Motion reveals.
+- _Windsurf focus_: Upload Murder Board mockup image; have Cascade generate matching CSS. Debug Framer Motion layout shifts.
+
+### Phase 3 — Integration (Weeks 9–12)
+
+**Goal**: UI controls the simulation. Actions produce visible outcomes.
+
+- Build Zustand store bridging ECS world → React components.
+- Wire all six verb slot XState machines to `VerbSystem`.
+- Implement Work verb end-to-end: drag dock location → Work slot → End Shift → +Cash.
+- Implement Scheme verb with one sample Situation card.
+- Connect Heat accumulation to Heat Lens overlay.
+- _Windsurf focus_: Race condition debugging between React render cycle and ECS tick. This is the hardest week technically.
+
+### Phase 4 — The Living World (Weeks 13–16)
+
+**Goal**: Procedurally generated world that feels alive.
+
+- Implement `ProcGenSystem` — faction generation with Warsim-style variables.
+- Implement `SocialSystem` — full graph with ripple effects.
+- Build `NetworkWeb.tsx` — SVG node graph with string connectors.
+- Implement `Dossier.tsx` — full deep-data modal with hidden trait reveal.
+- Populate JSON fixtures: 100 NPC names, 50 contraband types, 30 event templates.
+- _Windsurf focus_: Cascade generates massive JSON datasets. Use `procedural-generation` skill.
+
+### Phase 5 — Polish & Balance (Weeks 17–20)
+
+**Goal**: Feels like a real game. Systems are tuned. Tutorial exists.
+
+- Balance Fear/Respect curves and Heat income/decay ratios.
+- Implement scripted "First Week" for Jeffries (the cousin's favor plays out).
+- Tune faction AI aggression thresholds.
+- Stress test with 500 entities / 2000 graph edges.
+- Add ambient soundscape hooks (urban decay, distant sirens, rain).
+- _Windsurf focus_: Performance analysis of `SocialSystem` at scale. Chat Mode for architectural discussion.
+
+---
+
+## 10. Milestone 1 Definition (End of Week 4)
+
+The following must be working and passing tests before proceeding to Phase 2:
+
+1. ✅ `sim-ecs` World initialized; tick loop running at 60fps in console
+2. ✅ `TimeSystem` advancing: shifts, days, weeks logged correctly
+3. ✅ `ResourceSystem` accumulating Cash over time; decay rates applied
+4. ✅ `HeatComponent` initialized on Bartholomeu entity; Heat System reads it
+5. ✅ Bartholomeu's starting state fully loaded from `bartholomeu.ts` into ECS world
+6. ✅ 10 passing Vitest tests: resource accumulation, time advancement, component initialization
+7. ✅ `.windsurfrules` configured; all four skill folders created with SKILL.md stubs
+
+**Do not begin Phase 2 until all Milestone 1 items are checked.** Nail the invisible simulation before building the visible interface.
+
+---
+
+## Reference Material
+
+- sim-ecs: https://github.com/NSSTC/sim-ecs
+- dnd-kit docs: https://docs.dndkit.com
+- Zustand docs: https://docs.pmnd.rs/zustand/getting-started/introduction
+- XState docs: https://stately.ai/docs/xstate
+- Framer Motion docs: https://www.framer.com/motion/
+- Windsurf `.windsurfrules` guide: https://blog.stackademic.com/mastering-windsurfrules-react-typescript-projects-aee1e3fe4376
+- IM Fell English (Google Font): https://fonts.google.com/specimen/IM+Fell+English
+- Courier Prime (Google Font): https://fonts.google.com/specimen/Courier+Prime

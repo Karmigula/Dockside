@@ -1,0 +1,70 @@
+@import url('https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=IM+Fell+English:ital@0;1&family=Playfair+Display:wght@600;700&display=swap');
+
+:root {
+  --bg-primary: #0a0a08;
+  --bg-surface: #111109;
+  --bg-card: #1a1810;
+  --bg-cork: #2a2018;
+
+  --accent-gold: #b8963e;
+  --accent-red: #8b2020;
+  --accent-blue: #2a4a6b;
+  --accent-green: #2a4a30;
+  --accent-amber: #c4852a;
+  --accent-orange: #a04820;
+
+  --text-primary: #d4c8a8;
+  --text-secondary: #8a7a5a;
+  --text-accent: #e8d48a;
+
+  --panel-bg-top: rgba(26, 24, 16, 0.92);
+  --panel-bg-bottom: rgba(17, 17, 9, 0.92);
+  --panel-border: rgba(138, 122, 90, 0.35);
+
+  --font-body: 'IM Fell English', serif;
+  --font-mono: 'Courier Prime', monospace;
+  --font-display: 'Playfair Display', serif;
+
+  --card-width: 160px;
+  --card-height: 240px;
+  --board-surface-width: 2160px;
+  --board-surface-height: 1280px;
+
+  font-family: var(--font-body);
+  line-height: 1.45;
+  font-weight: 400;
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  overflow: hidden;
+  color: var(--text-primary);
+  background:
+    radial-gradient(circle at 15% 12%, rgba(196, 133, 42, 0.09), transparent 42%),
+    radial-gradient(circle at 86% 86%, rgba(139, 32, 32, 0.12), transparent 38%),
+    linear-gradient(180deg, var(--bg-surface), var(--bg-primary));
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+}

@@ -1,0 +1,43 @@
+## Architectural Rules
+
+- Pattern: Strict Entity-Component-System (ECS) via sim-ecs.
+- Entities are integer IDs only. No methods on entities.
+- Components are pure data classes. NO methods. NO logic.
+- Systems contain ALL logic. Systems must be stateless.
+- Never mutate ECS state directly from React components.
+  All mutations go through Zustand dispatch -> VerbSystem.
+
+## Language Rules
+
+- TypeScript strict mode. All functions have explicit return types.
+- Discriminated unions for game states and card states.
+- Const assertions for all static game data.
+- Prefer types over interfaces for consistency.
+
+## Naming Conventions
+
+- 1980s Detroit register for domain variables where appropriate
+  (e.g., `shakedown` not `collectTax`, `muscle` not `enforcers`)
+- ECS Components: suffix `Component` (e.g., `HeatComponent`)
+- ECS Systems: suffix `System` (e.g., `SocialSystem`)
+- React card components: suffix `Card` (e.g., `PersonCard`)
+- Machines: suffix `.machine.ts` (e.g., `verbSlot.machine.ts`)
+
+## Narrative Rules
+
+- Flavor text tone: noir, economical, morally neutral, 1986-accurate.
+- Never use generic RPG language ("The enemy attacks!").
+  Write like a crime novelist, not a game narrator.
+- Bartholomeu is always "he" or "Jeffries" in system text, never "the player."
+
+## Testing Rules
+
+- Every new System requires a corresponding `.test.ts` in systems/__tests__/
+- Test procedural generation with seeded randomness for determinism.
+- Validate social graph traversal logic explicitly.
+
+## Style Rules
+
+- No Tailwind. Plain CSS with CSS variables only.
+- No inline styles in JSX except Framer Motion animation props.
+- Card dimensions are CSS variables: --card-width: 160px; --card-height: 240px;
