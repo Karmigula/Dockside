@@ -1,6 +1,6 @@
 import { useDraggable } from '@dnd-kit/core';
 import { motion } from 'framer-motion';
-import { useMemo, useState, type ReactElement } from 'react';
+import { useMemo, useState, type CSSProperties, type ReactElement } from 'react';
 
 import type { ActiveVerbSlotId, BoardCardModel } from '../data/cards/phase2.board';
 
@@ -49,57 +49,49 @@ export const Card = ({ card, selected, assignedSlot, position, boardZoom, zIndex
   const adjustedDragY = dragY / boardZoom;
   const notesInputId = `${card.id}-notes`;
 
-  const cardGlow = useMemo((): string[] | string => {
+  const cardGlow = useMemo((): string => {
     if (assignedSlot !== null) {
-      return [
-        '0 8px 18px rgba(0, 0, 0, 0.35)',
-        '0 0 18px rgba(184, 150, 62, 0.58)',
-        '0 8px 18px rgba(0, 0, 0, 0.35)',
-      ];
+      return '0 0 18px rgba(184, 150, 62, 0.58), 0 8px 18px rgba(0, 0, 0, 0.35)';
     }
 
     if (selected) {
-      return [
-        '0 10px 22px rgba(0, 0, 0, 0.38)',
-        '0 0 15px rgba(196, 133, 42, 0.42)',
-        '0 10px 22px rgba(0, 0, 0, 0.38)',
-      ];
+      return '0 0 15px rgba(196, 133, 42, 0.42), 0 10px 22px rgba(0, 0, 0, 0.38)';
     }
 
     return '0 10px 22px rgba(0, 0, 0, 0.38)';
   }, [assignedSlot, selected]);
 
+  const hasDragOffset = adjustedDragX !== 0 || adjustedDragY !== 0;
+  const rootTransform = hasDragOffset
+    ? `translate(${adjustedDragX}px, ${adjustedDragY}px)${isDragging ? ' scale(1.04) rotate(1.15deg)' : ''}`
+    : isDragging
+      ? 'scale(1.04) rotate(1.15deg)'
+      : undefined;
+
+  const rootStyle: CSSProperties = {
+    left: position.x,
+    top: position.y,
+    zIndex,
+    transformOrigin: 'top left',
+    transform: rootTransform,
+    boxShadow: cardGlow,
+  };
+
   return (
-    <motion.article
+    <article
       ref={setNodeRef}
       {...attributes}
       {...listeners}
       data-card-root="true"
-      className={`board-card board-card--${card.cardType}`}
-      style={{ transformOrigin: 'top left' }}
+      className={`board-card board-card--${card.cardType}${isFlipped ? ' board-card--flipped' : ''}${
+        isDragging ? ' board-card--is-dragging' : ''
+      }`}
+      style={rootStyle}
       onClick={(): void => {
         onSelect(card.id);
       }}
-      animate={{
-        x: position.x + adjustedDragX,
-        y: position.y + adjustedDragY,
-        zIndex,
-        scale: isDragging ? 1.04 : 1,
-        rotate: isDragging ? 1.15 : 0,
-        boxShadow: cardGlow,
-      }}
-      whileHover={{ scale: isDragging ? 1.04 : 1.01 }}
-      transition={{
-        type: 'spring',
-        stiffness: 430,
-        damping: 30,
-      }}
     >
-      <motion.div
-        className="board-card__flip-shell"
-        animate={{ rotateY: isFlipped ? 180 : 0 }}
-        transition={{ duration: 0.38, ease: 'easeInOut' }}
-      >
+      <div className="board-card__flip-shell">
         <section className="board-card__face board-card__face--front">
           <header className="board-card__topline">
             <span className="board-card__type-pill">{card.cardType}</span>
@@ -200,7 +192,7 @@ export const Card = ({ card, selected, assignedSlot, position, boardZoom, zIndex
             Flip Back
           </button>
         </section>
-      </motion.div>
-    </motion.article>
+      </div>
+    </article>
   );
 };

@@ -80,7 +80,7 @@ type BoardCardPosition = {
   y: number;
 };
 
-const MAX_ZOOM = 1.2;
+const MIN_INTERACTIVE_ZOOM = 0.1;
 const ABSOLUTE_MIN_ZOOM = 0.68;
 const FIT_PADDING = 24;
 const BOARD_SURFACE_WIDTH = 2160;
@@ -227,7 +227,7 @@ export const MurderBoard = (): ReactElement => {
   }, []);
 
   const clampZoom = (value: number): number => {
-    return clamp(quantizeZoom(value), minZoom, MAX_ZOOM);
+    return Math.max(MIN_INTERACTIVE_ZOOM, quantizeZoom(value));
   };
 
   const activeDragCard = useMemo((): BoardCardModel | null => {
@@ -488,7 +488,7 @@ export const MurderBoard = (): ReactElement => {
               className="board-canvas__stage"
               style={{ transformOrigin: 'top left' }}
               animate={{ x: panX, y: panY, scale: zoom }}
-              transition={{ type: 'tween', ease: 'linear', duration: 0 }}
+              transition={{ type: 'tween', duration: 0 }}
             >
               {PHASE_TWO_BOARD_CARDS.map((card) => {
                 const cardPosition = cardPositions[card.id];

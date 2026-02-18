@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=IM+Fell+English:ital@0;1&family=Playfair+Display:wght@600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Playfair+Display:wght@600;700&display=swap');
 
 :root {
   --bg-primary: #0a0a08;
@@ -21,7 +21,7 @@
   --panel-bg-bottom: rgba(17, 17, 9, 0.92);
   --panel-border: rgba(138, 122, 90, 0.35);
 
-  --font-body: 'IM Fell English', serif;
+  --font-body: 'Courier Prime', monospace;
   --font-mono: 'Courier Prime', monospace;
   --font-display: 'Playfair Display', serif;
 
