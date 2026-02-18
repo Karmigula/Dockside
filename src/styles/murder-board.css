@@ -93,6 +93,9 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  /* Establish a stacking context so the canvas z-index is scoped within the layout */
+  position: relative;
+  isolation: isolate;
 }
 
 .verb-rack,
@@ -106,7 +109,8 @@
   flex-direction: column;
   min-height: 0;
   position: relative;
-  z-index: 1;
+  /* Panels sit above the canvas base layer but below any dragging card */
+  z-index: 2;
 }
 
 .verb-rack h2,
@@ -233,6 +237,7 @@
 
 .verb-slot__ring--progress {
   stroke: var(--accent-gold);
+  stroke-linecap: round;
   transition: stroke-dashoffset 120ms linear;
 }
 
@@ -292,12 +297,16 @@
   user-select: none;
   -webkit-user-select: none;
   position: relative;
-  z-index: 2;
+  /* Canvas sits at z-index 1 normally; cards inside are scoped to this context */
+  z-index: 1;
+  /* Isolate the card stacking context so dragged cards never bleed over panels */
+  isolation: isolate;
 }
 
 .board-canvas--dragging {
+  /* Open overflow so the dragged card can visually leave the canvas boundary */
   overflow: visible;
-  z-index: 20;
+  /* Do NOT raise z-index here — isolation keeps cards contained */
 }
 
 .board-canvas:active {

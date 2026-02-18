@@ -49,7 +49,7 @@ export const VerbSlot = ({ slot, queuedDrop, onComplete }: VerbSlotProps): React
     });
   }, [slot.durationMs, slot.id]);
 
-  const [state, send] = useMachine(machine, {});
+  const [state, send] = useMachine(machine);
 
   const { setNodeRef, isOver } = useDroppable({
     id: slot.id,
@@ -68,11 +68,14 @@ export const VerbSlot = ({ slot, queuedDrop, onComplete }: VerbSlotProps): React
       return;
     }
 
+    // Guard: only send if the token is genuinely new.
+    // Two drops within the same ms tick would share a token — treat as one.
     if (lastQueuedDropTokenRef.current === queuedDrop.token) {
       return;
     }
 
     lastQueuedDropTokenRef.current = queuedDrop.token;
+    emittedCompletionTokenRef.current = null;
 
     send({
       type: 'DROP_CARD',
@@ -80,8 +83,6 @@ export const VerbSlot = ({ slot, queuedDrop, onComplete }: VerbSlotProps): React
       cardId: queuedDrop.cardId,
       cardTitle: queuedDrop.cardTitle,
     });
-
-    emittedCompletionTokenRef.current = null;
   }, [queuedDrop, send, slot.id]);
 
   const isCoolingDown = state.matches('cooldown');
@@ -110,18 +111,16 @@ export const VerbSlot = ({ slot, queuedDrop, onComplete }: VerbSlotProps): React
       cardId: queuedCardId,
       cardTitle: queuedCardTitle,
     });
-  }, [
-    isCoolingDown,
-    onComplete,
-    queuedCardId,
-    queuedCardTitle,
-    queuedToken,
-    slot.id,
-  ]);
+  }, [isCoolingDown, onComplete, queuedCardId, queuedCardTitle, queuedToken, slot.id]);
 
-  const progress = 1 - state.context.remainingMs / state.context.durationMs;
-  const normalizedProgress = Math.max(0, Math.min(1, progress));
-  const dashOffset = TIMER_CIRCUMFERENCE - TIMER_CIRCUMFERENCE * normalizedProgress;
+  // Progress runs 0 → 1 over durationMs. Guard against durationMs === 0.
+  const rawProgress =
+    state.context.durationMs > 0
+      ? 1 - state.context.remainingMs / state.context.durationMs
+      : 0;
+  const normalizedProgress = Math.max(0, Math.min(1, rawProgress));
+  // dashOffset at 0 = full ring visible (complete). At CIRCUMFERENCE = empty ring (idle).
+  const dashOffset = TIMER_CIRCUMFERENCE * (1 - normalizedProgress);
 
   const slotStateLabel = state.matches('running')
     ? 'Running'
@@ -159,20 +158,33 @@ export const VerbSlot = ({ slot, queuedDrop, onComplete }: VerbSlotProps): React
       </header>
 
       <div className="verb-slot__timer-wrap">
-        <svg className="verb-slot__timer" width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
-          <circle className="verb-slot__ring verb-slot__ring--base" cx="22" cy="22" r={TIMER_RADIUS} />
+        <svg
+          className="verb-slot__timer"
+          width="44"
+          height="44"
+          viewBox="0 0 44 44"
+          aria-hidden="true"
+        >
+          <circle
+            className="verb-slot__ring verb-slot__ring--base"
+            cx="22"
+            cy="22"
+            r={TIMER_RADIUS}
+          />
           <circle
             className="verb-slot__ring verb-slot__ring--progress"
             cx="22"
             cy="22"
             r={TIMER_RADIUS}
-            strokeDasharray={TIMER_CIRCUMFERENCE}
+            strokeDasharray={`${TIMER_CIRCUMFERENCE} ${TIMER_CIRCUMFERENCE}`}
             strokeDashoffset={dashOffset}
           />
         </svg>
 
         <span className="verb-slot__queue-label">
-          {state.context.queuedCardTitle === null ? 'Drop card' : `Card: ${state.context.queuedCardTitle}`}
+          {state.context.queuedCardTitle === null
+            ? 'Drop card'
+            : `Card: ${state.context.queuedCardTitle}`}
         </span>
       </div>
 

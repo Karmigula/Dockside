@@ -9,6 +9,25 @@ This file tracks source edits made in this workspace and should be continuously 
 
 ## Edit Log
 
+### Edit 006 - Timer Ring, DROP_CARD Guard, and Canvas Z-Index Fix
+**Scope**
+- Fixed three live runtime bugs: timer ring not visually progressing, potential same-tick token collision on DROP_CARD, and dragged cards bleeding above verb rack / event log panels.
+
+**Files Updated**
+- `src/components/VerbSlot.tsx`
+- `src/styles/murder-board.css`
+
+**Key Results**
+- Fixed `strokeDasharray` to use the paired `"circumference circumference"` format required for SVG dash animation; ring now visually fills as the timer ticks.
+- Added `stroke-linecap: round` to the progress ring for a cleaner appearance.
+- Added `durationMs > 0` guard to prevent NaN dashOffset on zero-duration edge case.
+- Cleared `emittedCompletionTokenRef` before sending `DROP_CARD` (previously reset after send, leaving a window where a re-render mid-send could skip completion emission).
+- Removed erroneous `z-index: 20` from `.board-canvas--dragging`; replaced with `isolation: isolate` on `.board-canvas` to scope card stacking context inside the canvas.
+- Added `position: relative; isolation: isolate` to `.murder-board__layout` to contain all panel z-index competition within the layout grid.
+- Raised `.verb-rack` and `.event-log` to `z-index: 2` (was `z-index: 1`) so they sit above the canvas base layer without fighting dragged cards.
+
+---
+
 ### Edit 005 - Remaining-Issues Hardening Pass
 **Scope**
 - Addressed the follow-up architectural risk list after Edit 004.
